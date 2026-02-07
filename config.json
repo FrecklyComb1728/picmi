@@ -1,0 +1,37 @@
+{
+  "port": 5408,
+  "logLevel": "INFO",
+  "logFile": "./logs/app.log",
+  "logIpHeader": "x-forwarded-for",
+  "storageRoot": "./public/uploads",
+  "auth": {
+    "cookieSecret": "PicMi-Cookie-Secret",
+    "maxAgeSeconds": 604800,
+    "allowRemoteInit": false
+  },
+  "database": {
+    "driver": "sqlite",
+    "sqlite": {
+      "file": "./data/sqlite.db"
+    },
+    "mysql": {
+      "host": "",
+      "port": 3306,
+      "user": "",
+      "password": "",
+      "database": ""
+    },
+    "postgresql": {
+      "host": "",
+      "port": 5432,
+      "user": "",
+      "password": "",
+      "database": "",
+      "ssl": false
+    },
+    "supabase": {
+      "url": "",
+      "serviceRoleKey": ""
+    }
+  }
+}
