@@ -9,6 +9,7 @@ PicMi 是一个基于 Nuxt 4 与 Node.js 的自托管图床管理系统，提供
 相关项目：
 - [PicMi-Node](https://github.com/FrecklyComb1728/picmi-node)：PicMi 存储节点
 
+~~项目中如果有神秘注释的地方，就是AI写的，不用在意，能用就行~~
 ## 功能特性
 
 - 目录化图片管理，支持排序、分页、筛选与批量操作
@@ -30,44 +31,44 @@ PicMi 是一个基于 Nuxt 4 与 Node.js 的自托管图床管理系统，提供
 
 ## 快速开始
 
-### 安装依赖 / Install dependencies
+### 安装依赖
 
 ```bash
 pnpm install
 ```
 
-### 启动 Nuxt 应用（含 Nitro API） / Start Nuxt
+### 启动开发服务器
 
 ```bash
 pnpm dev
 ```
 
-### 启动独立 Express 后端 / Start Express backend
+### 启动独立 Express 后端
 
 ```bash
-./scripts/dev.ps1
+node server/index.js
 ```
 
 默认端口来源于 config.json 中的 port 字段，默认值为 5408。
 
-### 生产构建与启动 / Build & Start
+### 生产构建与启动
 
 ```bash
-pnpm build
-pnpm start
+pnpm build && pnpm start
 ```
 
-### 单元测试 / Unit Tests
+默认端口来源于 config.json 中的 port 字段，默认值为 5408。
+
+### 单元测试
 
 ```bash
 pnpm test:unit
 ```
 
-### 代码检查 / Lint & Typecheck
+### 代码检查
 
 ```bash
-pnpm lint
-pnpm typecheck
+pnpm lint && pnpm typecheck
 ```
 
 ## 配置概览
@@ -130,7 +131,6 @@ routes/           Express 路由
 middleware/       Express 中间件
 public/           静态资源与本地上传目录
 data/             SQLite 默认存储
-scripts/          启动脚本
 ```
 
 ## 文档导航
