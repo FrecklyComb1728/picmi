@@ -14,7 +14,7 @@
     <div class="flex items-center gap-3">
       <n-tooltip trigger="hover">
         <template #trigger>
-           <n-button circle quaternary size="small" tag="a" href="https://github.com/XPoet/picx" target="_blank">
+           <n-button circle quaternary size="small" tag="a" href="https://github.com/FrecklyComb1728/picmi" target="_blank">
               <template #icon><n-icon :component="LogoGithub" /></template>
            </n-button>
         </template>

@@ -8,3 +8,4 @@ node_modules
 logs
 *.log
 data/sqlite.db
+/uploads
