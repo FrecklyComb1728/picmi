@@ -16,7 +16,6 @@ auth 子项：
 
 - cookieSecret：Cookie 加密密钥，生产环境必须设置
 - maxAgeSeconds：登录有效期秒数，最小 60
-- allowRemoteInit：是否允许远程初始化管理员
 
 database 子项：
 
@@ -26,7 +25,7 @@ database 子项：
 - postgresql：host/port/user/password/database/ssl
 - supabase：url/serviceRoleKey
 
-## 环境变量
+## 环境变量（可选）
 
 - PICMI_ROOT：指定根目录，影响配置与静态资源路径
 - LOG_LEVEL：覆盖 logLevel 的日志级别

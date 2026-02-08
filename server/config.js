@@ -18,11 +18,12 @@ const defaults = {
   logLevel: 'INFO',
   logFile: './logs/app.log',
   logIpHeader: 'x-forwarded-for',
+  trustProxy: 'loopback',
   storageRoot: './public/uploads',
   auth: {
     cookieSecret: '',
     maxAgeSeconds: 7 * 24 * 60 * 60,
-    allowRemoteInit: false
+    allowRemoteInit: process.env.NODE_ENV !== 'production'
   },
   database: {
     driver: 'sqlite',

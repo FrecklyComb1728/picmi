@@ -11,7 +11,7 @@ pnpm dev
 启动独立 Express：
 
 ```bash
-./scripts/dev.ps1
+node --watch server/index.js
 ```
 
 ## 生产模式
@@ -19,14 +19,13 @@ pnpm dev
 构建与启动 Nuxt：
 
 ```bash
-pnpm build
-pnpm start
+pnpm build && pnpm start
 ```
 
 启动独立 Express：
 
 ```bash
-./scripts/prod.ps1
+node server/index.js
 ```
 
 ## 目录与文件

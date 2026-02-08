@@ -56,13 +56,6 @@ export function useAuth() {
     }
   }
 
-  const initAccount = async (payload: LoginPayload) => {
-    await apiFetch('/auth/init', {
-      method: 'POST',
-      body: payload
-    })
-  }
-
   const logout = async () => {
     try {
       await apiFetch('/logout', { method: 'POST' })
@@ -85,7 +78,6 @@ export function useAuth() {
     fetchStatus,
     refreshAuth,
     logout,
-    updateCredentials,
-    initAccount
+    updateCredentials
   }
 }

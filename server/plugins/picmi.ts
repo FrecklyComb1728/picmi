@@ -26,6 +26,12 @@ export default defineNitroPlugin(async (nitroApp) => {
 
   const logger = createLogger(config)
   const store = await buildStore(config)
+  const adminExisting = await store.getAdminUsername?.()
+  if (!adminExisting) {
+    const users = await store.getUsers()
+    const first = users.map((u: any) => String(u?.username ?? '').trim()).filter(Boolean).sort()[0] ?? null
+    if (first) await store.setAdminUsername(first)
+  }
 
   const nodeMonitor = new NodeMonitor(logger)
   nodeMonitor.start(store)

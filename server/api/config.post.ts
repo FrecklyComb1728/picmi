@@ -1,9 +1,9 @@
 import path from 'node:path'
 import { normalizePath } from '../utils/paths.js'
-import { fail, ok, readBodySafe, requireAuth, usePicmi } from '../utils/nitro'
+import { fail, ok, readBodySafe, readResponseBufferWithLimit, requireAdmin, usePicmi } from '../utils/nitro'
 
 export default defineEventHandler(async (event) => {
-  const auth = await requireAuth(event)
+  const auth = await requireAdmin(event)
   if (auth) return auth
 
   try {
@@ -15,6 +15,9 @@ export default defineEventHandler(async (event) => {
     const enableLocalStorage = body?.enableLocalStorage ?? false
     const maxUploadBytesRaw = body?.maxUploadBytes
     if (!listApi || !Array.isArray(nodes)) return fail(event, 400, 40001, '参数错误')
+    const listApiStr = String(listApi).trim()
+    if (!listApiStr.startsWith('/api/')) return fail(event, 400, 40001, '参数错误')
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(listApiStr)) return fail(event, 400, 40001, '参数错误')
     if (maxUploadBytesRaw !== undefined) {
       const n = Number(maxUploadBytesRaw)
       if (!Number.isFinite(n)) return fail(event, 400, 40001, '参数错误')
@@ -25,7 +28,7 @@ export default defineEventHandler(async (event) => {
     const prev = await picmi.store.getConfig()
     const prevNodes = Array.isArray(prev?.nodes) ? prev.nodes : []
     await syncNewNodes(prevNodes, nodes as any[])
-    await picmi.store.saveConfig(String(listApi), nodes, enableLocalStorage, maxUploadBytesRaw)
+    await picmi.store.saveConfig(listApiStr, nodes, enableLocalStorage, maxUploadBytesRaw)
     return ok(null)
   } catch {
     return fail(event, 500, 1, '服务异常')
@@ -35,8 +38,19 @@ export default defineEventHandler(async (event) => {
 const normalizeHttpBase = (address: any) => {
   const raw = String(address ?? '').trim()
   if (!raw) return null
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) return raw
-  return `http://${raw}`
+  const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw) ? raw : `http://${raw}`
+  try {
+    const url = new URL(withScheme)
+    if (url.username || url.password) return null
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    if (process.env.NODE_ENV === 'production') {
+      const host = url.hostname.toLowerCase()
+      if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') return null
+    }
+    return url.origin
+  } catch {
+    return null
+  }
 }
 
 const buildAuthHeaders = (node: any): Record<string, string> => {
@@ -64,7 +78,18 @@ const toRelativePath = (fullPath: any, rootPath: any) => {
 }
 
 const fetchJsonData = async (url: URL, options?: RequestInit) => {
-  const res = await fetch(url, options)
+  const ms = 15_000
+  const signal =
+    (options as any)?.signal ??
+    (typeof (AbortSignal as any)?.timeout === 'function'
+      ? (AbortSignal as any).timeout(ms)
+      : (() => {
+          const controller = new AbortController()
+          const t = setTimeout(() => controller.abort(), ms)
+          controller.signal.addEventListener('abort', () => clearTimeout(t), { once: true })
+          return controller.signal
+        })())
+  const res = await fetch(url, { redirect: 'error', ...options, signal })
   const payload = await res.json().catch(() => null)
   if (!res.ok || !payload || payload.code !== 0) {
     throw new Error(payload?.message || `http ${res.status}`)
@@ -122,9 +147,18 @@ const createDirOnNode = async (nodeInfo: any, relDir: string) => {
 
 const uploadFileToNode = async (sourceInfo: any, targetInfo: any, relPath: string, sourceMeta: any) => {
   const fileUrl = new URL(`/uploads${joinNodePath(sourceInfo.rootPath, relPath)}`, sourceInfo.base).toString()
-  const res = await fetch(fileUrl, { headers: sourceInfo.headers })
+  const signal =
+    typeof (AbortSignal as any)?.timeout === 'function'
+      ? (AbortSignal as any).timeout(15_000)
+      : (() => {
+          const controller = new AbortController()
+          const t = setTimeout(() => controller.abort(), 15_000)
+          controller.signal.addEventListener('abort', () => clearTimeout(t), { once: true })
+          return controller.signal
+        })()
+  const res = await fetch(fileUrl, { redirect: 'error', headers: sourceInfo.headers, signal })
   if (!res.ok) throw new Error(`http ${res.status}`)
-  const buf = Buffer.from(await res.arrayBuffer())
+  const buf = await readResponseBufferWithLimit(res, 1024 * 1024 * 1024)
 
   const relDir = normalizePath(path.posix.dirname(relPath))
   const fileName = path.posix.basename(relPath)

@@ -75,6 +75,7 @@ import {
   LogOutOutline, 
   ChevronDown 
 } from '@vicons/ionicons5'
+import logoUrl from '~/assets/svg/logo.svg?url'
 
 const { open: openCommandPalette } = useCommandPalette()
 
@@ -83,7 +84,6 @@ const router = useRouter()
 const { logout } = useAuth()
 
 const collapsed = ref(false)
-const logoUrl = new URL('~/assets/svg/logo.svg', import.meta.url).toString()
 const username = ref('Admin')
 
 const activeKey = computed(() => {

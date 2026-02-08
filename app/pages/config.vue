@@ -135,10 +135,10 @@
            <n-form-item-gi class="min-w-0" :span="24" label="地址" :validation-status="editorAddressError ? 'error' : undefined" :feedback="editorAddressError">
              <n-input v-model:value="editor.address" placeholder="例如: https://dav.example.com" class="w-full" />
            </n-form-item-gi>
-           <n-form-item-gi class="min-w-0" :span="12" label="账号">
+           <n-form-item-gi v-if="!isPicmiNode" class="min-w-0" :span="12" label="账号">
              <n-input v-model:value="editor.username" placeholder="用户名（可选）" class="w-full" />
            </n-form-item-gi>
-           <n-form-item-gi class="min-w-0" :span="12" label="密码">
+           <n-form-item-gi class="min-w-0" :span="isPicmiNode ? 24 : 12" label="密码">
              <n-input v-model:value="editor.password" type="password" show-password-on="click" placeholder="密码（可选）" class="w-full" />
            </n-form-item-gi>
            <n-form-item-gi class="min-w-0" :span="18" label="根目录">
@@ -165,7 +165,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, h, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, h, onMounted, onBeforeUnmount, watch } from 'vue'
 import { 
   NCard, NForm, NFormItem, NInput, NButton, NIcon, NBadge, NSwitch, NModal, NSpace, NSelect, useMessage, useDialog,
   NGrid, NFormItemGi, NInputNumber
@@ -238,8 +238,16 @@ const load = async () => {
       type: allowed.has(String(node.type)) ? node.type : 'picmi-node',
       username: node.username ?? ''
     }))
-  } catch {
+  } catch (e: any) {
     nodes.value = []
+    const status = e?.status || e?.response?.status
+    const code = e?.data?.code || e?.response?._data?.code
+    if (import.meta.client && (status === 403 || code === 40301)) {
+      message.error('无权限')
+      await navigateTo('/dashboard')
+      return
+    }
+    if (import.meta.client) message.error('加载失败')
   }
 }
 
@@ -249,8 +257,16 @@ const loadStatus = async () => {
   try {
     const res = await apiFetch<{ byId?: Record<string, any> }>('/nodes/status', { method: 'GET' })
     nodeStatusById.value = res.byId ?? {}
-  } catch {
+  } catch (e: any) {
     nodeStatusById.value = {}
+    const status = e?.status || e?.response?.status
+    const code = e?.data?.code || e?.response?._data?.code
+    if (import.meta.client && (status === 403 || code === 40301)) {
+      if (statusTimer.value) window.clearInterval(statusTimer.value)
+      statusTimer.value = null
+      message.error('无权限')
+      await navigateTo('/dashboard')
+    }
   }
 }
 
@@ -348,6 +364,8 @@ const editor = reactive<Omit<NodeConfig, 'id'>>({
   rootDir: '/'
 })
 
+const isPicmiNode = computed(() => editor.type === 'picmi-node')
+
 const editorNameError = computed(() => {
   if (!editorSubmitted.value) return ''
   return editor.name.trim() ? '' : '请输入名称'
@@ -371,6 +389,13 @@ const openEditor = (node: NodeConfig | null) => {
   editorSubmitted.value = false
 }
 
+watch(
+  () => editor.type,
+  (value) => {
+    if (value === 'picmi-node') editor.username = ''
+  }
+)
+
 const saveNode = async () => {
   editorSubmitted.value = true
   if (!editor.name.trim() || !editor.address.trim()) return
@@ -379,7 +404,7 @@ const saveNode = async () => {
     name: editor.name.trim(),
     type: editor.type,
     address: editor.address.trim(),
-    username: editor.username.trim(),
+    username: editor.type === 'picmi-node' ? '' : editor.username.trim(),
     password: editor.password,
     enabled: editor.enabled,
     rootDir: editor.rootDir.trim() || '/'

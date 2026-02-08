@@ -12,8 +12,9 @@ const safe = (value) => {
 const requestLogger = (logger, config) => {
   return (req, res, next) => {
     res.on('finish', () => {
-      const ipHeader = config.logIpHeader || 'x-forwarded-for'
-      const forwarded = safe(req.headers[ipHeader])
+      const trustProxy = config?.trustProxy !== false
+      const ipHeader = config?.logIpHeader || 'x-forwarded-for'
+      const forwarded = trustProxy ? safe(req.headers[ipHeader]) : '-'
       const ip = safe(req.ip || req.socket?.remoteAddress)
       const time = formatDate(new Date())
       const method = safe(req.method)

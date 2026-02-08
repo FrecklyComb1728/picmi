@@ -23,15 +23,38 @@ export const fail = (event: H3Event, status: number, code: number, message: stri
   return { code, message, data: null }
 }
 
-export const isLoggedIn = (event: H3Event) => {
+export const getAuthPayload = (event: H3Event) => {
   const value = getCookie(event, 'picmi.auth')
-  return Boolean(parseAuthCookieValue(value))
+  return parseAuthCookieValue(value)
+}
+
+export const getAuthUsername = (event: H3Event) => {
+  return getAuthPayload(event)?.u ?? null
+}
+
+export const isLoggedIn = (event: H3Event) => {
+  return Boolean(getAuthPayload(event))
 }
 
 export const requireAuth = async (event: H3Event, allow?: () => boolean | Promise<boolean>) => {
   if (isLoggedIn(event)) return null
   if (allow && (await allow())) return null
   return fail(event, 401, 40101, '未登录')
+}
+
+export const requireAdmin = async (event: H3Event) => {
+  const auth = await requireAuth(event)
+  if (auth) return auth
+  try {
+    const picmi = await usePicmi(event)
+    const admin = await picmi.store.getAdminUsername()
+    const username = getAuthUsername(event)
+    if (!admin) return fail(event, 403, 40301, '未初始化管理员')
+    if (!username || username !== admin) return fail(event, 403, 40301, '无权限')
+    return null
+  } catch {
+    return fail(event, 500, 1, '服务异常')
+  }
 }
 
 export const getPicmi = (event: H3Event) => {
@@ -60,6 +83,12 @@ const initPicmi = async () => {
   await ensureDir(path.resolve(rootDir, config.storageRoot))
   const logger = createLogger(config)
   const store = await buildStore(config)
+  const adminExisting = await store.getAdminUsername?.()
+  if (!adminExisting) {
+    const users = await store.getUsers()
+    const first = users.map((u: any) => String(u?.username ?? '').trim()).filter(Boolean).sort()[0] ?? null
+    if (first) await store.setAdminUsername(first)
+  }
   const nodeMonitor = new NodeMonitor(logger)
   nodeMonitor.start(store)
   return { config, logger, store, nodeMonitor }
@@ -89,8 +118,19 @@ export const readBodySafe = async <T>(event: H3Event) => {
 export const normalizeHttpBase = (address: any) => {
   const raw = String(address ?? '').trim()
   if (!raw) return null
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) return raw
-  return `http://${raw}`
+  const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw) ? raw : `http://${raw}`
+  try {
+    const url = new URL(withScheme)
+    if (url.username || url.password) return null
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    if (process.env.NODE_ENV === 'production') {
+      const host = url.hostname.toLowerCase()
+      if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') return null
+    }
+    return url.origin
+  } catch {
+    return null
+  }
 }
 
 export const buildNodeAuthHeaders = (node: any): Record<string, string> => {
@@ -119,12 +159,46 @@ export const toRelativePath = (fullPath: any, rootPath: any) => {
 
 export const fetchNodePayload = async (url: URL, options?: RequestInit) => {
   try {
-    const res = await fetch(url, options)
+    const ms = 15_000
+    const signal =
+      (options as any)?.signal ??
+      (typeof (AbortSignal as any)?.timeout === 'function'
+        ? (AbortSignal as any).timeout(ms)
+        : (() => {
+            const controller = new AbortController()
+            const t = setTimeout(() => controller.abort(), ms)
+            controller.signal.addEventListener('abort', () => clearTimeout(t), { once: true })
+            return controller.signal
+          })())
+
+    const res = await fetch(url, { redirect: 'error', ...options, signal })
     const payload = await res.json().catch(() => null)
     return { res, payload, error: null as any }
   } catch (error: any) {
     return { res: null as any, payload: null, error }
   }
+}
+
+export const readResponseBufferWithLimit = async (res: Response, maxBytes: number) => {
+  const lenRaw = res.headers.get('content-length')
+  const len = lenRaw ? Number(lenRaw) : 0
+  if (Number.isFinite(len) && len > 0 && len > maxBytes) throw new Error('response too large')
+
+  const body: any = (res as any).body
+  if (!body?.getReader) return Buffer.from(await res.arrayBuffer())
+
+  const reader = body.getReader()
+  const chunks: Buffer[] = []
+  let total = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    const buf = Buffer.from(value)
+    total += buf.length
+    if (total > maxBytes) throw new Error('response too large')
+    chunks.push(buf)
+  }
+  return Buffer.concat(chunks, total)
 }
 
 export const pickEnabledPicmiNode = (nodes: any[]) => {

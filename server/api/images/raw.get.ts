@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { getQuery, setResponseHeader, setResponseStatus } from 'h3'
 import { normalizePath } from '../../utils/paths.js'
-import { buildNodeAuthHeaders, fail, joinNodePath, normalizeHttpBase, pickEnabledPicmiNode, requireAuth, usePicmi } from '../../utils/nitro'
+import { buildNodeAuthHeaders, fail, joinNodePath, normalizeHttpBase, pickEnabledPicmiNode, readResponseBufferWithLimit, requireAuth, usePicmi } from '../../utils/nitro'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -26,7 +26,16 @@ export default defineEventHandler(async (event) => {
 
     const nodePath = joinNodePath(node?.rootDir || '/', relPath)
     const url = new URL(`/uploads${nodePath}`, base).toString()
-    const res = await fetch(url, { headers: { ...buildNodeAuthHeaders(node) } })
+    const signal =
+      typeof (AbortSignal as any)?.timeout === 'function'
+        ? (AbortSignal as any).timeout(15_000)
+        : (() => {
+            const controller = new AbortController()
+            const t = setTimeout(() => controller.abort(), 15_000)
+            controller.signal.addEventListener('abort', () => clearTimeout(t), { once: true })
+            return controller.signal
+          })()
+    const res = await fetch(url, { redirect: 'error', headers: { ...buildNodeAuthHeaders(node) }, signal })
     if (!res.ok) {
       if (res.status === 404) return fail(event, 404, 40401, '文件不存在')
       return fail(event, 502, 50201, `节点访问失败(${res.status})`)
@@ -41,7 +50,7 @@ export default defineEventHandler(async (event) => {
     const etag = res.headers.get('etag')
     if (etag) setResponseHeader(event, 'etag', etag)
     setResponseStatus(event, 200)
-    return Buffer.from(await res.arrayBuffer())
+    return await readResponseBufferWithLimit(res, 1024 * 1024 * 1024)
   } catch {
     return fail(event, 500, 1, '服务异常')
   }

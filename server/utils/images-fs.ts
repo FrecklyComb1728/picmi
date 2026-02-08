@@ -2,26 +2,15 @@ import fs from 'node:fs/promises'
 import fsSync from 'node:fs'
 import path from 'node:path'
 import { normalizePath, resolvePath, toUrlPath } from './paths.js'
+import { normalizeMaxUploadBytesBasic as normalizeMaxUploadBytesImpl, sanitizeSingleNameBasic as sanitizeSingleNameImpl } from './images-common.js'
 
 export const sanitizeSingleName = (value: string) => {
-  const raw = String(value ?? '').trim()
-  const name = raw.replace(/\\/g, '/').split('/').pop() ?? ''
-  if (!name || name === '.' || name === '..') return null
-  if (name.includes('/') || name.includes('\\')) return null
-  if (name.includes('\0')) return null
-  if (name.length > 255) return null
-  return name
+  return sanitizeSingleNameImpl(value) as string | null
 }
 
-export const isAllowedImageName = (name: string) => {
-  return true
-}
 
 export const normalizeMaxUploadBytes = (value: unknown) => {
-  const maxUploadBytesDefault = 20 * 1024 * 1024
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed)) return maxUploadBytesDefault
-  return Math.max(1 * 1024 * 1024, Math.floor(parsed))
+  return normalizeMaxUploadBytesImpl(value)
 }
 
 export const listEntries = async (root: string, currentPath: string) => {

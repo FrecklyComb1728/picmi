@@ -9,6 +9,14 @@
     :bordered="false"
   >
     <div class="space-y-6">
+      <input
+        ref="manualFileInput"
+        type="file"
+        multiple
+        accept="image/*"
+        style="position: fixed; left: 0; top: 0; width: 1px; height: 1px; opacity: 0;"
+        @change="handleManualFileInputChange"
+      />
       <div class="flex items-center justify-between text-sm text-zinc-500 bg-zinc-50 px-3 py-2 rounded-md border border-zinc-100">
         <span>当前目录：{{ currentPath }}</span>
       </div>
@@ -137,6 +145,7 @@ watch(
 
 const files = ref<FileItem[]>([])
 const uploading = ref(false)
+const manualFileInput = ref<HTMLInputElement | null>(null)
 
 watch(open, (v) => {
   if (!v) clear()
@@ -162,6 +171,13 @@ watch(
 const handleFileChange = (data: { fileList: UploadFileInfo[] }) => {
   const incoming = data.fileList.map(f => f.file).filter((f): f is File => !!f)
   addFiles(incoming)
+}
+
+const handleManualFileInputChange = (e: Event) => {
+  const input = e.target as HTMLInputElement | null
+  const picked = input?.files ? Array.from(input.files) : []
+  addFiles(picked)
+  if (input) input.value = ''
 }
 
 const addFiles = (incoming: File[]) => {
@@ -281,6 +297,22 @@ const uploadOneFrontend = async (item: FileItem) => {
   })
 }
 
+const getUploadErrorText = (e: any) => {
+  const apiMessage = e?.data?.message || e?.response?._data?.message
+  if (typeof apiMessage === 'string' && apiMessage.trim()) return apiMessage.trim()
+
+  const status = e?.status || e?.statusCode || e?.response?.status
+  const code = e?.data?.code || e?.response?._data?.code
+  if (status === 413 || code === 41301) return '文件过大'
+  if (status === 415 || code === 41501) return '文件类型不支持'
+  if (status === 409 || code === 40901) return '文件已存在'
+  if (status === 401 || code === 40101) return '未登录'
+
+  const rawMessage = e?.message
+  if (rawMessage && /fetch|network/i.test(rawMessage)) return '无法连接到服务'
+  return (typeof rawMessage === 'string' && rawMessage.trim()) ? rawMessage.trim() : '上传失败'
+}
+
 const onUpload = async () => {
   uploading.value = true
   try {
@@ -290,14 +322,21 @@ const onUpload = async () => {
       return
     }
     for (const item of files.value) {
-      const exists = await checkExists(item)
-      const override = exists ? await ensureOverrideDecision(item) : false
-      if (exists && !override) continue
+      try {
+        const exists = await checkExists(item)
+        const override = exists ? await ensureOverrideDecision(item) : false
+        if (exists && !override) continue
 
-      if (mode.value === 'backend') {
-        await uploadOneBackend(item, override)
-      } else {
-        await uploadOneFrontend(item)
+        if (mode.value === 'backend') {
+          await uploadOneBackend(item, override)
+        } else {
+          await uploadOneFrontend(item)
+        }
+      } catch (e: any) {
+        const text = getUploadErrorText(e)
+        message.error(`${item.name} 上传失败：${text}`)
+        if (e && typeof e === 'object') (e as any).__picmiHandledMessage = true
+        throw e
       }
     }
 
@@ -307,7 +346,9 @@ const onUpload = async () => {
     emit('uploaded')
     open.value = false
   } catch (error) {
-    message.error('上传失败')
+    if (error && typeof error === 'object' && (error as any).__picmiHandledMessage === true) return
+    const text = getUploadErrorText(error)
+    message.error(`上传失败：${text}`)
   } finally {
     uploading.value = false
   }

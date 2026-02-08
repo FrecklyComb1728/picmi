@@ -11,8 +11,19 @@ const nowIso = () => new Date().toISOString()
 const normalizeHttpBase = (address) => {
   const raw = String(address ?? '').trim()
   if (!raw) return null
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) return raw
-  return `http://${raw}`
+  const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw) ? raw : `http://${raw}`
+  try {
+    const url = new URL(withScheme)
+    if (url.username || url.password) return null
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    if (process.env.NODE_ENV === 'production') {
+      const host = url.hostname.toLowerCase()
+      if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') return null
+    }
+    return url.origin
+  } catch {
+    return null
+  }
 }
 
 const normalizeFtpBase = (address) => {
@@ -58,7 +69,7 @@ const tryFetch = async (url, options, timeoutMs) => {
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const startedAt = Date.now()
-    const res = await fetch(url, { ...options, signal: controller.signal })
+    const res = await fetch(url, { redirect: 'error', ...options, signal: controller.signal })
     const latencyMs = Date.now() - startedAt
     return { res, latencyMs }
   } finally {
@@ -432,4 +443,3 @@ class NodeMonitor {
 }
 
 export { NodeMonitor }
-

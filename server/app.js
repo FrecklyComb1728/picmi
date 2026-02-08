@@ -36,7 +36,7 @@ const createApp = async (config, logger, store) => {
   await ensureDirectories(config)
 
   const app = express()
-  app.set('trust proxy', true)
+  app.set('trust proxy', config?.trustProxy ?? 'loopback')
   app.disable('x-powered-by')
   app.locals.config = config
   app.locals.logger = logger

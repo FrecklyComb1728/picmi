@@ -3,7 +3,22 @@ import fs from 'node:fs/promises'
 import { rootDir } from '../../config.js'
 import { ensureDir, normalizeMaxUploadBytes, sanitizeSingleName } from '../../utils/images-fs'
 import { normalizePath, resolvePath } from '../../utils/paths.js'
+import { validateImageUpload } from '../../utils/images-validate.js'
 import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, normalizeHttpBase, ok, pickEnabledPicmiNode, readBodySafe, requireAuth, usePicmi } from '../../utils/nitro'
+
+const formatNumber = (n: number, digits = 1) => {
+  const s = n.toFixed(digits)
+  return s.endsWith('.0') ? s.slice(0, -2) : s
+}
+
+const formatBytes = (bytes: number) => {
+  const kb = bytes / 1024
+  if (kb < 1024) return `${Math.max(1, Math.round(kb))} KB`
+  const mb = kb / 1024
+  if (mb < 1024) return `${formatNumber(mb)} MB`
+  const gb = mb / 1024
+  return `${formatNumber(gb)} GB`
+}
 
 export default defineEventHandler(async (event) => {
   const auth = await requireAuth(event)
@@ -34,13 +49,16 @@ export default defineEventHandler(async (event) => {
     const parts = raw.split(',')
     const data = parts.length > 1 ? parts.slice(1).join(',') : raw
     const approx = Math.floor((data.length * 3) / 4)
-    if (approx > maxUploadBytes) return fail(event, 413, 41301, '文件过大')
+    if (approx > maxUploadBytes) return fail(event, 413, 41301, `文件过大（最大 ${formatBytes(maxUploadBytes)}）`)
+    const buf = Buffer.from(data, 'base64')
+    const check = validateImageUpload(safeName, buf)
+    if (!check.ok) return fail(event, 415, 41501, String(check.message || '文件类型不支持'))
 
     if (enableLocalStorage) {
       const root = path.resolve(rootDir, picmi.config.storageRoot)
       const { target } = resolvePath(root, path.posix.join(currentPath, safeName))
       await ensureDir(path.dirname(target))
-      await fs.writeFile(target, Buffer.from(data, 'base64'))
+      await fs.writeFile(target, buf)
       return ok(null)
     }
 

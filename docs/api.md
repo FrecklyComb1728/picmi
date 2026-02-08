@@ -57,16 +57,6 @@
 { "code": 0, "message": "ok", "data": { "needsSetup": false, "loggedIn": true } }
 ```
 
-### POST /api/auth/init
-
-说明：仅在无用户时可执行，默认限制本地调用。
-
-请求体：
-
-```json
-{ "username": "admin", "password": "123456" }
-```
-
 ## 配置
 
 ### GET /api/config

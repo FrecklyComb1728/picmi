@@ -18,7 +18,7 @@
 
 ### 模式二：独立 Express 后端（适合拆分部署）
 
-- 启动命令：node server/index.js 或 scripts/dev.ps1
+- 启动命令：node server/index.js
 - 路由由 routes/ 下的模块加载
 - 静态资源由 Express 直接暴露 public/
 

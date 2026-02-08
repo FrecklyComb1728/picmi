@@ -21,7 +21,7 @@ if (portFromConfig && !process.env.NUXT_PORT && !process.env.PORT) {
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   ssr: true,
-  devtools: { enabled: true },
+  devtools: { enabled: process.env.NODE_ENV !== 'production' },
   modules: ['@vueuse/motion/nuxt'],
   css: ['~/assets/css/tailwind.css'],
   build: {
@@ -56,14 +56,21 @@ export default defineNuxtConfig({
   },
   nitro: {
     routeRules: {
-      '/login': { swr: 3600 },
-      '/dashboard': { swr: 3600 },
-      '/images/**': { swr: 3600},
-      '/config': { swr: 3600 },
-      '/users': { swr: 3600 },
+      '/login': { headers: { 'Cache-Control': 'no-store' } },
+      '/dashboard': { headers: { 'Cache-Control': 'no-store' } },
+      '/images/**': { headers: { 'Cache-Control': 'no-store' } },
+      '/config': { headers: { 'Cache-Control': 'no-store' } },
+      '/users': { headers: { 'Cache-Control': 'no-store' } },
 
-      '/api/**': { headers: { 'Cache-Control': 'no-cache, max-age=0' } },
-      '/': { headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } },
+      '/api/**': { headers: { 'Cache-Control': 'no-store' } },
+      '/': { headers: { 'Cache-Control': 'no-store' } },
+      '/uploads/**': {
+        headers: {
+          'X-Content-Type-Options': 'nosniff',
+          'Content-Security-Policy': "sandbox; default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+          'Cache-Control': 'no-store'
+        }
+      },
       '/_nuxt/**': { headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } },
       '/assets/**': { headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } },
       '/favicon.ico': { headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } },

@@ -74,8 +74,16 @@ const load = async () => {
   try {
     const res = await apiFetch<{ users?: UserRow[] }>('/users', { method: 'GET' })
     users.value = res.users ?? []
-  } catch {
-    users.value = [{ username: 'admin' }]
+  } catch (e: any) {
+    users.value = []
+    const status = e?.status || e?.response?.status
+    const code = e?.data?.code || e?.response?._data?.code
+    if (import.meta.client && (status === 403 || code === 40301)) {
+      message.error('无权限')
+      await navigateTo('/dashboard')
+      return
+    }
+    if (import.meta.client) message.error('加载失败')
   }
 }
 

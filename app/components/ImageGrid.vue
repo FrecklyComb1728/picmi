@@ -48,6 +48,8 @@ import { toRefs, h } from 'vue'
 import { NCheckbox, NDropdown, NButton, NIcon } from 'naive-ui'
 import { EllipsisVertical, CopyOutline, FolderOpenOutline, CreateOutline, TrashOutline } from '@vicons/ionicons5'
 import type { ImageEntry } from '~/types/images'
+import folderIconUrl from '~/assets/svg/folder.svg?url'
+import imageIconUrl from '~/assets/svg/image.svg?url'
 
 const props = defineProps<{
   entries: ImageEntry[]
@@ -61,9 +63,6 @@ const emit = defineEmits<{
   action: [action: string, entry: ImageEntry]
   dblclick: [entry: ImageEntry]
 }>()
-
-const folderIconUrl = new URL('~/assets/svg/folder.svg', import.meta.url).toString()
-const imageIconUrl = new URL('~/assets/svg/image.svg', import.meta.url).toString()
 
 const renderIcon = (icon: any) => {
   return () => h(NIcon, null, { default: () => h(icon) })

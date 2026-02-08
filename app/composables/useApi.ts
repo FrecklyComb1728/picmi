@@ -1,4 +1,31 @@
-export type ApiFetchOptions<T> = Omit<Parameters<typeof $fetch<T>>[1], 'baseURL'>
+type ApiFetchExtraOptions = {
+  method?:
+    | 'GET'
+    | 'POST'
+    | 'PUT'
+    | 'PATCH'
+    | 'DELETE'
+    | 'HEAD'
+    | 'OPTIONS'
+    | 'CONNECT'
+    | 'TRACE'
+    | 'get'
+    | 'post'
+    | 'put'
+    | 'patch'
+    | 'delete'
+    | 'head'
+    | 'options'
+    | 'connect'
+    | 'trace'
+  query?: Record<string, any>
+  body?: any
+  headers?: HeadersInit
+  credentials?: RequestCredentials
+}
+
+export type ApiFetchOptions<T> = Omit<Parameters<typeof $fetch<T>>[1], 'baseURL' | 'headers' | 'method' | 'query' | 'body' | 'credentials'> &
+  ApiFetchExtraOptions
 
 type ApiEnvelope<T> = {
   code: number
@@ -16,10 +43,20 @@ export function useApi() {
   const config = useRuntimeConfig()
 
   const apiFetch = async <T>(path: string, options: ApiFetchOptions<T> = {}) => {
+    const headers = (() => {
+      if (!import.meta.server) return options.headers
+      const reqHeaders = useRequestHeaders(['cookie'])
+      if (!options.headers) return reqHeaders
+      const merged = new Headers(reqHeaders as any)
+      new Headers(options.headers as any).forEach((value, key) => merged.set(key, value))
+      return Object.fromEntries(merged.entries())
+    })()
+
     const res = await $fetch<any>(path, {
       baseURL: config.public.apiBase,
       credentials: 'include',
-      ...options
+      ...options,
+      headers
     })
 
     if (isEnvelope(res)) {

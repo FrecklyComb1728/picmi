@@ -1,8 +1,8 @@
 import { normalizePath } from '../../utils/paths.js'
-import { fail, ok, readBodySafe, requireAuth, usePicmi } from '../../utils/nitro'
+import { fail, ok, readBodySafe, requireAdmin, usePicmi } from '../../utils/nitro'
 
 export default defineEventHandler(async (event) => {
-  const auth = await requireAuth(event)
+  const auth = await requireAdmin(event)
   if (auth) return auth
 
   try {

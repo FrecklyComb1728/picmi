@@ -1,12 +1,12 @@
 import { Router } from 'express'
 import path from 'node:path'
 import { normalizePath } from '../server/utils/paths.js'
-import { requireAuth } from '../middleware/auth.js'
+import { requireAdmin } from '../middleware/auth.js'
 import { expressOk, expressFail } from '../server/utils/http.js'
 
 const router = Router()
 
-router.get('/config', requireAuth(), async (req, res, next) => {
+router.get('/config', requireAdmin(), async (req, res, next) => {
   try {
     const store = req.app.locals.store
     const config = await store.getConfig()
@@ -16,10 +16,13 @@ router.get('/config', requireAuth(), async (req, res, next) => {
   }
 })
 
-router.post('/config', requireAuth(), async (req, res, next) => {
+router.post('/config', requireAdmin(), async (req, res, next) => {
   try {
     const { listApi, nodes, enableLocalStorage, maxUploadBytes } = req.body ?? {}
     if (!listApi || !Array.isArray(nodes)) return expressFail(res, 400, 40001, '参数错误')
+    const listApiStr = String(listApi).trim()
+    if (!listApiStr.startsWith('/api/')) return expressFail(res, 400, 40001, '参数错误')
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(listApiStr)) return expressFail(res, 400, 40001, '参数错误')
     if (maxUploadBytes !== undefined) {
       const n = Number(maxUploadBytes)
       if (!Number.isFinite(n)) return expressFail(res, 400, 40001, '参数错误')
@@ -32,7 +35,7 @@ router.post('/config', requireAuth(), async (req, res, next) => {
     const prev = await store.getConfig()
     const prevNodes = Array.isArray(prev?.nodes) ? prev.nodes : []
     await syncNewNodes(prevNodes, nodes)
-    await store.saveConfig(String(listApi), nodes, enableLocalStorage === true, maxUploadBytes)
+    await store.saveConfig(listApiStr, nodes, enableLocalStorage === true, maxUploadBytes)
     return expressOk(res, null)
   } catch (error) {
     next(error)
@@ -42,8 +45,19 @@ router.post('/config', requireAuth(), async (req, res, next) => {
 const normalizeHttpBase = (address) => {
   const raw = String(address ?? '').trim()
   if (!raw) return null
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) return raw
-  return `http://${raw}`
+  const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw) ? raw : `http://${raw}`
+  try {
+    const url = new URL(withScheme)
+    if (url.username || url.password) return null
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    if (process.env.NODE_ENV === 'production') {
+      const host = url.hostname.toLowerCase()
+      if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') return null
+    }
+    return url.origin
+  } catch {
+    return null
+  }
 }
 
 const buildAuthHeaders = (node) => {
@@ -69,7 +83,18 @@ const toRelativePath = (fullPath, rootPath) => {
 }
 
 const fetchJsonData = async (url, options) => {
-  const res = await fetch(url, options)
+  const ms = 15_000
+  const signal =
+    options?.signal ??
+    (typeof AbortSignal?.timeout === 'function'
+      ? AbortSignal.timeout(ms)
+      : (() => {
+          const controller = new AbortController()
+          const t = setTimeout(() => controller.abort(), ms)
+          controller.signal.addEventListener('abort', () => clearTimeout(t), { once: true })
+          return controller.signal
+        })())
+  const res = await fetch(url, { redirect: 'error', ...options, signal })
   const payload = await res.json().catch(() => null)
   if (!res.ok || !payload || payload.code !== 0) {
     throw new Error(payload?.message || `http ${res.status}`)

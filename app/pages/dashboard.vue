@@ -112,13 +112,9 @@ onMounted(async () => {
     if (Number.isFinite(totalCount)) stats.value.count = totalCount
   }
 
-  const listRes = await $fetch<any>(`${apiBase}/images/list`).catch(() => null)
-  const items = Array.isArray(listRes?.data?.items) ? listRes.data.items : []
-  const images = items.filter((f: any) => f && f.type === 'image')
-  recentFiles.value = images
-    .slice()
-    .sort((a: any, b: any) => String(b?.uploadedAt ?? '').localeCompare(String(a?.uploadedAt ?? '')))
-    .slice(0, 6)
+  const recentRes = await $fetch<any>(`${apiBase}/images/recent`, { query: { limit: 6 } }).catch(() => null)
+  const recentItems = Array.isArray(recentRes?.data?.items) ? recentRes.data.items : []
+  recentFiles.value = recentItems.filter((f: any) => f && f.type === 'image')
 
   const config = await $fetch<any>(`${apiBase}/config`).catch(() => null)
   if (Array.isArray(config?.data?.nodes)) stats.value.nodes = config.data.nodes.length

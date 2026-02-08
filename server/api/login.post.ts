@@ -22,7 +22,8 @@ export default defineEventHandler(async (event) => {
 
     const token = createAuthCookieValue({ u: user.username, t: Date.now() })
     const xfp = String(event.node.req.headers['x-forwarded-proto'] ?? '')
-    const secure = xfp === 'https' || Boolean((event.node.req.socket as any)?.encrypted)
+    const trustProxy = picmi.config?.trustProxy !== false
+    const secure = trustProxy ? (xfp === 'https' || Boolean((event.node.req.socket as any)?.encrypted)) : Boolean((event.node.req.socket as any)?.encrypted)
     const maxAge = Math.max(60, Number(picmi.config.auth?.maxAgeSeconds ?? 0) || 7 * 24 * 60 * 60)
     setCookie(event, 'picmi.auth', token, { sameSite: 'lax', path: '/', httpOnly: true, secure, maxAge })
     return ok({ username: user.username })

@@ -130,6 +130,17 @@ const createSqlStore = (db, dialect) => {
     await db.run(upsertSettingSql(), [key, value])
   }
 
+  const getAdminUsername = async () => {
+    const value = await getSetting('adminUsername')
+    const normalized = String(value ?? '').trim()
+    return normalized ? normalized : null
+  }
+
+  const setAdminUsername = async (username) => {
+    const normalized = String(username ?? '').trim()
+    await setSetting('adminUsername', normalized)
+  }
+
   const getUsers = async () => {
     const rows = await db.all('SELECT username FROM users')
     return rows.map((row) => ({ username: row.username }))
@@ -234,6 +245,8 @@ const createSqlStore = (db, dialect) => {
   }
 
   return {
+    getAdminUsername,
+    setAdminUsername,
     getUsers,
     getUser,
     upsertUser,
@@ -247,6 +260,18 @@ const createSqlStore = (db, dialect) => {
 }
 
 const createSupabaseStore = (sb) => {
+  const getAdminUsername = async () => {
+    const rows = await sb.all('settings', 'key, value')
+    const value = rows.find((row) => row.key === 'adminUsername')?.value
+    const normalized = String(value ?? '').trim()
+    return normalized ? normalized : null
+  }
+
+  const setAdminUsername = async (username) => {
+    const normalized = String(username ?? '').trim()
+    await sb.upsert('settings', { key: 'adminUsername', value: normalized })
+  }
+
   const getUsers = async () => {
     const rows = await sb.all('users', 'username')
     return rows.map((row) => ({ username: row.username }))
@@ -359,6 +384,8 @@ const createSupabaseStore = (sb) => {
   }
 
   return {
+    getAdminUsername,
+    setAdminUsername,
     getUsers,
     getUser,
     upsertUser,

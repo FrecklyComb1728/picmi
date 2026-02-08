@@ -5,9 +5,8 @@
   "logIpHeader": "x-forwarded-for",
   "storageRoot": "./public/uploads",
   "auth": {
-    "cookieSecret": "PicMi-Cookie-Secret",
-    "maxAgeSeconds": 604800,
-    "allowRemoteInit": false
+    "cookieSecret": "",
+    "maxAgeSeconds": 604800
   },
   "database": {
     "driver": "sqlite",
