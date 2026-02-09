@@ -9,7 +9,7 @@
     >
       <div class="flex items-start gap-3 p-3">
         <div class="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-zinc-50 text-zinc-900">
-          <img :src="entry.type === 'folder' ? folderIconUrl : imageIconUrl" alt="" class="h-6 w-6" />
+          <img :src="iconUrl(entry)" alt="" class="h-6 w-6" />
         </div>
         <div class="min-w-0 flex-1">
           <div class="truncate text-sm font-medium text-zinc-900">{{ entry.name }}</div>
@@ -50,6 +50,7 @@ import { EllipsisVertical, CopyOutline, FolderOpenOutline, CreateOutline, TrashO
 import type { ImageEntry } from '~/types/images'
 import folderIconUrl from '~/assets/svg/folder.svg?url'
 import imageIconUrl from '~/assets/svg/image.svg?url'
+import fileIconUrl from '~/assets/svg/file.svg?url'
 
 const props = defineProps<{
   entries: ImageEntry[]
@@ -66,6 +67,12 @@ const emit = defineEmits<{
 
 const renderIcon = (icon: any) => {
   return () => h(NIcon, null, { default: () => h(icon) })
+}
+
+const iconUrl = (entry: ImageEntry) => {
+  if (entry.type === 'folder') return folderIconUrl
+  if (entry.type === 'image') return imageIconUrl
+  return fileIconUrl
 }
 
 const getActionOptions = (entry: ImageEntry) => [
@@ -97,7 +104,8 @@ const metaText = (entry: ImageEntry) => {
     if (kb < 1024) return `${kb.toFixed(0)} KB`
     return `${(kb / 1024).toFixed(1)} MB`
   }
-  return entry.uploadedAt ? new Date(entry.uploadedAt).toLocaleDateString() : '图片'
+  if (entry.type === 'folder') return '文件夹'
+  return entry.uploadedAt ? new Date(entry.uploadedAt).toLocaleDateString() : (entry.type === 'image' ? '图片' : '文件')
 }
 
 const { entries, selectable, selectedSet } = toRefs(props)

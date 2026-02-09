@@ -2,7 +2,7 @@
   <n-modal
     v-model:show="open"
     preset="card"
-    title="上传图片"
+    title="上传文件"
     class="w-full max-w-xl"
     :segmented="{ content: 'soft', footer: 'soft' }"
     size="large"
@@ -13,7 +13,6 @@
         ref="manualFileInput"
         type="file"
         multiple
-        accept="image/*"
         style="position: fixed; left: 0; top: 0; width: 1px; height: 1px; opacity: 0;"
         @change="handleManualFileInputChange"
       />
@@ -181,11 +180,9 @@ const handleManualFileInputChange = (e: Event) => {
 }
 
 const addFiles = (incoming: File[]) => {
-  const onlyImages = incoming.filter((f) => f.type.startsWith('image/'))
-  if (!onlyImages.length) return
-  
   const existingNames = new Set(files.value.map(f => f.name))
-  const unique = onlyImages.filter(f => !existingNames.has(f.name))
+  const unique = incoming.filter(f => !existingNames.has(f.name))
+  if (!unique.length) return
   
   const newItems = unique.map(f => ({
     id: crypto.randomUUID(),

@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { getQuery } from 'h3'
 import { rootDir } from '../../config.js'
-import { normalizePath, toUrlPath } from '../../utils/paths.js'
+import { isImageFileName, normalizePath, toUrlPath } from '../../utils/paths.js'
 import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, normalizeHttpBase, ok, pickEnabledPicmiNode, requireAuth, toRelativePath, usePicmi } from '../../utils/nitro'
 
 let cache: { key: string; limit: number; ts: number; data: any } | null = null
@@ -45,8 +45,9 @@ const scanLocalRecent = async (root: string, limit: number) => {
         const info = await fs.stat(full)
         const relDir = current.rel.replace(/^\/+/, '')
         const entryUrlPath = toUrlPath(path.posix.join('/uploads', relDir, entry.name))
+        const type = isImageFileName(entry.name) ? 'image' : 'file'
         pushTop(top, {
-          type: 'image',
+          type,
           name: entry.name,
           path: normalizePath(path.posix.join(current.rel, entry.name)),
           url: entryUrlPath,
@@ -93,8 +94,10 @@ const scanNodeRecent = async (node: any, rootPath: string, limit: number) => {
       scannedItems += 1
       if (scannedItems > maxItems) break
       const relPath = toRelativePath(item?.path, rootPath)
+      const type = isImageFileName(item?.name) ? 'image' : 'file'
       pushTop(top, {
         ...item,
+        type,
         path: relPath,
         url: `/api/images/raw?path=${encodeURIComponent(relPath)}`
       }, limit)
@@ -115,11 +118,11 @@ export default defineEventHandler(async (event) => {
     if (auth) return auth
 
     const config = await picmi.store.getConfig()
-    const enableLocalStorage = config?.enableLocalStorage === true
     const nodes = Array.isArray(config?.nodes) ? config.nodes : []
     const hasEnabledNode = nodes.some((n: any) => n && n.enabled !== false)
 
-    if (!enableLocalStorage && hasEnabledNode) {
+    if (nodes.length > 0) {
+      if (!hasEnabledNode) return ok({ items: [], nodeError: '未配置可用存储节点' } as any)
       const node = pickEnabledPicmiNode(nodes)
       if (!node) return ok({ items: [], nodeError: '未配置可用存储节点' } as any)
       const rootPath = normalizePath(node?.rootDir || '/')

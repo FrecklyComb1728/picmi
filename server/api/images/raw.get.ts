@@ -49,6 +49,10 @@ export default defineEventHandler(async (event) => {
     if (lastModified) setResponseHeader(event, 'last-modified', lastModified)
     const etag = res.headers.get('etag')
     if (etag) setResponseHeader(event, 'etag', etag)
+    const name = path.posix.basename(relPath)
+    const asciiName = name.replace(/[\r\n]/g, '').replace(/"/g, '').replace(/[\\/]/g, '').replace(/[^\x20-\x7E]/g, '_')
+    const utf8Name = encodeURIComponent(name).replace(/%20/g, ' ')
+    setResponseHeader(event, 'content-disposition', `inline; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`)
     setResponseStatus(event, 200)
     return await readResponseBufferWithLimit(res, 1024 * 1024 * 1024)
   } catch {

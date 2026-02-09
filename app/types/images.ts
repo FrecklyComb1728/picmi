@@ -1,4 +1,4 @@
-export type ImageEntryType = 'image' | 'folder'
+export type ImageEntryType = 'image' | 'file' | 'folder'
 
 export type ImageEntry = {
   type: ImageEntryType

@@ -32,7 +32,7 @@
 请求体：
 
 ```json
-{ "username": "admin", "password": "123456" }
+{ "username": "admin", "password": "picmi" }
 ```
 
 返回：

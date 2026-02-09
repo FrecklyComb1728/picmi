@@ -117,6 +117,21 @@
             <n-pagination v-if="sortedImages.length > pageSize" v-model:page="page" :page-size="pageSize" :item-count="sortedImages.length" />
           </div>
         </div>
+
+        <div v-if="sortedFiles.length" class="mt-6">
+          <div class="mb-2 text-xs font-semibold text-zinc-500 flex justify-between uppercase tracking-wider">
+            <span>Files</span>
+            <span>{{ sortedFiles.length }}</span>
+          </div>
+          <ImageGrid
+            :entries="sortedFiles"
+            :selectable="selectable"
+            :selected-set="selectedPaths"
+            @open="openEntry"
+            @toggle="toggleEntry"
+            @action="handleGridAction"
+          />
+        </div>
       </div>
       <n-empty v-else description="暂无文件" class="py-12" />
     </div>
@@ -383,11 +398,13 @@ const sortFn = computed(() => {
 
 const folders = computed(() => filteredList.value.filter((it) => it.type === 'folder'))
 const images = computed(() => filteredList.value.filter((it) => it.type === 'image'))
+const files = computed(() => filteredList.value.filter((it) => it.type === 'file'))
 
 const sortedFolders = computed(() => (sortFn.value ? [...folders.value].sort(sortFn.value) : folders.value))
 const sortedImages = computed(() => (sortFn.value ? [...images.value].sort(sortFn.value) : images.value))
+const sortedFiles = computed(() => (sortFn.value ? [...files.value].sort(sortFn.value) : files.value))
 
-const sortedItems = computed(() => [...sortedFolders.value, ...sortedImages.value])
+const sortedItems = computed(() => [...sortedFolders.value, ...sortedImages.value, ...sortedFiles.value])
 
 const pagedImages = computed(() => {
   const start = (page.value - 1) * pageSize.value
@@ -411,6 +428,11 @@ const openEntry = async (entry: ImageEntry) => {
       .map(encodeURIComponent)
       .join('/')
     await navigateTo(`/images/${encoded}`)
+    return
+  }
+  if (entry.type === 'file') {
+    const rawUrl = `/api/images/raw?path=${encodeURIComponent(entry.path)}`
+    if (import.meta.client) window.open(rawUrl, '_blank', 'noopener,noreferrer')
     return
   }
   activeEntry.value = entry
@@ -457,7 +479,7 @@ const selectedItems = computed<ClipboardItem[]>(() => {
   const map = new Map(rawItems.value.map((it) => [it.path, it]))
   return [...selectedPaths].map((path) => {
     const it = map.get(path)
-    return { path, type: it?.type ?? 'image' }
+    return { path, type: it?.type ?? 'file' }
   })
 })
 

@@ -1,8 +1,7 @@
 import fs from 'node:fs/promises'
 import fsSync from 'node:fs'
 import path from 'node:path'
-import { normalizePath, resolvePath, toUrlPath } from './paths.js'
-import { normalizeMaxUploadBytesBasic as normalizeMaxUploadBytesImpl, sanitizeSingleNameBasic as sanitizeSingleNameImpl } from './images-common.js'
+import { isImageFileName, normalizeMaxUploadBytesBasic as normalizeMaxUploadBytesImpl, normalizePath, resolvePath, sanitizeSingleNameBasic as sanitizeSingleNameImpl, toUrlPath } from './paths.js'
 
 export const sanitizeSingleName = (value: string) => {
   return sanitizeSingleNameImpl(value) as string | null
@@ -30,8 +29,9 @@ export const listEntries = async (root: string, currentPath: string) => {
       items.push({ type: 'folder', name: entry.name, path: normalizePath(path.posix.join(normalized, entry.name)) })
     } else if (entry.isFile()) {
       const info = await fs.stat(entryPath)
+      const type = isImageFileName(entry.name) ? 'image' : 'file'
       items.push({
-        type: 'image',
+        type,
         name: entry.name,
         path: normalizePath(path.posix.join(normalized, entry.name)),
         url: entryUrlPath,

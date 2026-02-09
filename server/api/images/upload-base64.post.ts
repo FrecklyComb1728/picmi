@@ -2,8 +2,7 @@ import path from 'node:path'
 import fs from 'node:fs/promises'
 import { rootDir } from '../../config.js'
 import { ensureDir, normalizeMaxUploadBytes, sanitizeSingleName } from '../../utils/images-fs'
-import { normalizePath, resolvePath } from '../../utils/paths.js'
-import { validateImageUpload } from '../../utils/images-validate.js'
+import { normalizePath, resolvePath, validateImageUpload } from '../../utils/paths.js'
 import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, normalizeHttpBase, ok, pickEnabledPicmiNode, readBodySafe, requireAuth, usePicmi } from '../../utils/nitro'
 
 const formatNumber = (n: number, digits = 1) => {

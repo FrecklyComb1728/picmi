@@ -2,7 +2,7 @@ export type ClipboardMode = 'copy' | 'cut'
 
 export type ClipboardItem = {
   path: string
-  type: 'image' | 'folder'
+  type: 'image' | 'file' | 'folder'
 }
 
 type ImageClipboard = {

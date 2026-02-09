@@ -2,7 +2,7 @@ import path from 'node:path'
 import { getQuery } from 'h3'
 import { rootDir } from '../../config.js'
 import { listEntries } from '../../utils/images-fs'
-import { normalizePath } from '../../utils/paths.js'
+import { isImageFileName, normalizePath } from '../../utils/paths.js'
 import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, normalizeHttpBase, ok, pickEnabledPicmiNode, requireAuth, toRelativePath, usePicmi } from '../../utils/nitro'
 
 export default defineEventHandler(async (event) => {
@@ -18,10 +18,10 @@ export default defineEventHandler(async (event) => {
     if (auth) return auth
 
     const config = await picmi.store.getConfig()
-    const enableLocalStorage = config?.enableLocalStorage === true
     const nodes = Array.isArray(config?.nodes) ? config.nodes : []
     const hasEnabledNode = nodes.some((node: any) => node && node.enabled !== false)
-    if (!enableLocalStorage && hasEnabledNode) {
+    if (nodes.length > 0) {
+      if (!hasEnabledNode) return ok({ path: currentPath, items: [], nodeError: '未配置可用存储节点' } as any)
       const node = pickEnabledPicmiNode(nodes)
       if (!node) return ok({ path: currentPath, items: [], nodeError: '未配置可用存储节点' } as any)
       const base = normalizeHttpBase(node?.address)
@@ -44,8 +44,10 @@ export default defineEventHandler(async (event) => {
       const mapped = items.map((it: any) => {
         const rel = toRelativePath(it?.path, rootPath)
         if (it?.type === 'image') {
+          const kind = isImageFileName(it?.name) ? 'image' : 'file'
           return {
             ...it,
+            type: kind,
             path: rel,
             url: `/api/images/raw?path=${encodeURIComponent(rel)}`
           }

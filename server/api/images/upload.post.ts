@@ -4,8 +4,7 @@ import fs from 'node:fs/promises'
 import { getHeader, readMultipartFormData } from 'h3'
 import { rootDir } from '../../config.js'
 import { ensureDir, normalizeMaxUploadBytes, sanitizeSingleName } from '../../utils/images-fs'
-import { normalizePath, resolvePath } from '../../utils/paths.js'
-import { validateImageUpload } from '../../utils/images-validate.js'
+import { normalizePath, normalizeUploadFileName, resolvePath, validateImageUpload } from '../../utils/paths.js'
 import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, normalizeHttpBase, ok, pickEnabledPicmiNode, requireAuth, usePicmi } from '../../utils/nitro'
 
 const formatNumber = (n: number, digits = 1) => {
@@ -57,7 +56,7 @@ export default defineEventHandler(async (event) => {
     const override = getValue('override') === '1'
     const file = form.find((it) => it.name === 'file' && (it as any).filename) as any
     if (!file?.filename || !file?.data) return fail(event, 400, 40001, '文件为空')
-    const safeName = sanitizeSingleName(String(file.filename))
+    const safeName = sanitizeSingleName(normalizeUploadFileName(String(file.filename)))
     if (!safeName) return fail(event, 400, 40001, '文件名不合法')
     const buf = Buffer.from(file.data)
     if (buf.length > maxUploadBytes) return fail(event, 413, 41301, `文件过大（最大 ${formatBytes(maxUploadBytes)}）`)

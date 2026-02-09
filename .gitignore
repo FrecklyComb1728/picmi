@@ -9,3 +9,4 @@ logs
 *.log
 data/sqlite.db
 /uploads
+/public/uploads
