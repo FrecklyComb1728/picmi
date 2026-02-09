@@ -23,7 +23,7 @@ const initMysql = async (config) => {
     await run('CREATE TABLE IF NOT EXISTS users (username VARCHAR(128) PRIMARY KEY, password_hash VARCHAR(256) NOT NULL)')
     await run('CREATE TABLE IF NOT EXISTS settings (`key` VARCHAR(128) PRIMARY KEY, `value` TEXT NOT NULL)')
     await run('CREATE TABLE IF NOT EXISTS nodes (id VARCHAR(128) PRIMARY KEY, name VARCHAR(128), type VARCHAR(32), address TEXT, username TEXT, password TEXT, enabled TINYINT, root_dir TEXT)')
-    await run('CREATE TABLE IF NOT EXISTS public_paths (path TEXT PRIMARY KEY)')
+    await run('CREATE TABLE IF NOT EXISTS public_paths (path VARCHAR(768) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin PRIMARY KEY) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin')
     const columns = await all("SHOW COLUMNS FROM nodes LIKE 'type'")
     if (columns.length === 0) {
       await run('ALTER TABLE nodes ADD COLUMN type VARCHAR(32)')
@@ -31,6 +31,18 @@ const initMysql = async (config) => {
     const userColumns = await all("SHOW COLUMNS FROM nodes LIKE 'username'")
     if (userColumns.length === 0) {
       await run('ALTER TABLE nodes ADD COLUMN username TEXT')
+    }
+
+    const publicPathColumns = await all("SHOW COLUMNS FROM public_paths LIKE 'path'")
+    if (publicPathColumns.length > 0) {
+      const type = String(publicPathColumns[0]?.Type ?? '').toLowerCase()
+      if (type === 'text' || type.startsWith('text')) {
+        await run('ALTER TABLE public_paths MODIFY COLUMN path VARCHAR(768) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL')
+      }
+      const key = String(publicPathColumns[0]?.Key ?? '')
+      if (key !== 'PRI') {
+        await run('ALTER TABLE public_paths ADD PRIMARY KEY (path)')
+      }
     }
   }
 
