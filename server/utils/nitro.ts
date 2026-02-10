@@ -206,3 +206,8 @@ export const pickEnabledPicmiNode = (nodes: any[]) => {
   const enabled = list.filter((node) => node && node.enabled !== false)
   return enabled.find((node) => String(node?.type ?? 'picmi-node') === 'picmi-node') ?? null
 }
+
+export const listEnabledPicmiNodes = (nodes: any[]) => {
+  const list = Array.isArray(nodes) ? nodes : []
+  return list.filter((node) => node && node.enabled !== false && String(node?.type ?? 'picmi-node') === 'picmi-node')
+}

@@ -3,7 +3,7 @@ import path from 'node:path'
 import { getQuery } from 'h3'
 import { rootDir } from '../../config.js'
 import { isImageFileName, normalizePath, toUrlPath } from '../../utils/paths.js'
-import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, normalizeHttpBase, ok, pickEnabledPicmiNode, requireAuth, toRelativePath, usePicmi } from '../../utils/nitro'
+import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, listEnabledPicmiNodes, normalizeHttpBase, ok, requireAuth, toRelativePath, usePicmi } from '../../utils/nitro'
 
 let cache: { key: string; limit: number; ts: number; data: any } | null = null
 const cacheTtlMs = 10_000
@@ -119,22 +119,45 @@ export default defineEventHandler(async (event) => {
 
     const config = await picmi.store.getConfig()
     const nodes = Array.isArray(config?.nodes) ? config.nodes : []
-    const hasEnabledNode = nodes.some((n: any) => n && n.enabled !== false)
 
     if (nodes.length > 0) {
-      if (!hasEnabledNode) return ok({ items: [], nodeError: '未配置可用存储节点' } as any)
-      const node = pickEnabledPicmiNode(nodes)
-      if (!node) return ok({ items: [], nodeError: '未配置可用存储节点' } as any)
-      const rootPath = normalizePath(node?.rootDir || '/')
-      try {
-        const key = `node:${String(node?.address ?? '')}|${rootPath}`
-        if (cache && cache.key === key && cache.limit === limit && Date.now() - cache.ts < cacheTtlMs) return ok(cache.data)
-        const data = await scanNodeRecent(node, rootPath, limit)
-        cache = { key, limit, ts: Date.now(), data }
-        return ok(data)
-      } catch {
-        return ok({ items: [], nodeError: '节点不可达' } as any)
+      const enabledNodes = listEnabledPicmiNodes(nodes)
+      if (enabledNodes.length === 0) return ok({ items: [], nodeError: '未配置可用存储节点' } as any)
+      const key = `nodes:${enabledNodes.map((n: any) => `${String(n?.id ?? '')}:${String(n?.address ?? '')}:${String(n?.rootDir ?? '/')}`).join('|')}`
+      if (cache && cache.key === key && cache.limit === limit && Date.now() - cache.ts < cacheTtlMs) return ok(cache.data)
+      const merged = new Map<string, any>()
+      let truncated = false
+      let okCount = 0
+      let errorCount = 0
+      for (const node of enabledNodes) {
+        const rootPath = normalizePath(node?.rootDir || '/')
+        try {
+          const data = await scanNodeRecent(node, rootPath, limit)
+          okCount += 1
+          truncated = truncated || Boolean((data as any)?.truncated)
+          const items = Array.isArray((data as any)?.items) ? (data as any).items : []
+          for (const it of items) {
+            const rel = String(it?.path ?? '')
+            if (!rel) continue
+            const prev = merged.get(rel)
+            if (!prev) {
+              merged.set(rel, it)
+              continue
+            }
+            const prevAt = String(prev?.uploadedAt ?? '')
+            const nextAt = String(it?.uploadedAt ?? '')
+            if (nextAt && (!prevAt || nextAt.localeCompare(prevAt) > 0)) merged.set(rel, it)
+          }
+        } catch {
+          errorCount += 1
+        }
       }
+      const top: any[] = []
+      for (const it of merged.values()) pushTop(top, it, limit)
+      const nodeError = okCount === 0 ? '节点不可达' : (errorCount > 0 ? '部分节点不可达' : undefined)
+      const out = { items: top, truncated, nodeError }
+      cache = { key, limit, ts: Date.now(), data: out }
+      return ok(out as any)
     }
 
     const root = path.resolve(rootDir, picmi.config.storageRoot)

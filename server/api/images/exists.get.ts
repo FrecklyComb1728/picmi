@@ -3,7 +3,7 @@ import fsSync from 'node:fs'
 import { getQuery } from 'h3'
 import { rootDir } from '../../config.js'
 import { normalizePath, resolvePath } from '../../utils/paths.js'
-import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, normalizeHttpBase, ok, pickEnabledPicmiNode, requireAuth, usePicmi } from '../../utils/nitro'
+import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, listEnabledPicmiNodes, normalizeHttpBase, ok, requireAuth, usePicmi } from '../../utils/nitro'
 
 export default defineEventHandler(async (event) => {
   const auth = await requireAuth(event)
@@ -19,20 +19,24 @@ export default defineEventHandler(async (event) => {
     const config = await picmi.store.getConfig()
     const enableLocalStorage = config?.enableLocalStorage === true
     const nodes = Array.isArray(config?.nodes) ? config.nodes : []
-    const hasEnabledNode = nodes.some((node: any) => node && node.enabled !== false)
-    if (!enableLocalStorage && hasEnabledNode) {
-      const node = pickEnabledPicmiNode(nodes)
-      if (!node) return fail(event, 400, 40002, '未配置可用存储节点')
-      const base = normalizeHttpBase(node?.address)
-      if (!base) return fail(event, 400, 40002, '节点地址无效')
-      const url = new URL('/api/images/exists', base)
-      url.searchParams.set('path', joinNodePath(node?.rootDir || '/', currentPath))
-      url.searchParams.set('filename', filename)
-      const { res, payload } = await fetchNodePayload(url, { headers: { ...buildNodeAuthHeaders(node) } })
-      if (!res) return fail(event, 502, 50201, '节点不可达')
-      if (!payload || typeof payload !== 'object') return fail(event, 502, 50201, '节点响应异常')
-      if (!res.ok) return fail(event, res.status, Number((payload as any).code) || 1, String((payload as any).message || `http ${res.status}`))
-      return payload as any
+    const enabledNodes = listEnabledPicmiNodes(nodes)
+    if (!enableLocalStorage && enabledNodes.length > 0) {
+      let okCount = 0
+      for (const node of enabledNodes) {
+        const base = normalizeHttpBase(node?.address)
+        if (!base) continue
+        const url = new URL('/api/images/exists', base)
+        url.searchParams.set('path', joinNodePath(node?.rootDir || '/', currentPath))
+        url.searchParams.set('filename', filename)
+        const { res, payload } = await fetchNodePayload(url, { headers: { ...buildNodeAuthHeaders(node) } })
+        if (!res || !payload || typeof payload !== 'object' || !res.ok) continue
+        okCount += 1
+        const data = (payload && typeof payload === 'object' && 'data' in payload) ? (payload as any).data : null
+        const exists = Boolean(data?.exists)
+        if (exists) return ok({ exists: true })
+      }
+      if (okCount > 0) return ok({ exists: false })
+      return fail(event, 502, 50201, '节点不可达')
     }
 
     const root = path.resolve(rootDir, picmi.config.storageRoot)

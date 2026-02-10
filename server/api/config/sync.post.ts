@@ -1,72 +1,8 @@
-import { Router } from 'express'
 import path from 'node:path'
-import { normalizePath } from '../server/utils/paths.js'
-import { requireAdmin } from '../middleware/auth.js'
-import { expressOk, expressFail } from '../server/utils/http.js'
+import { normalizePath } from '../../utils/paths.js'
+import { fail, ok, readBodySafe, readResponseBufferWithLimit, requireAdmin, usePicmi } from '../../utils/nitro'
 
-const router = Router()
-
-router.get('/config', requireAdmin(), async (req, res, next) => {
-  try {
-    const store = req.app.locals.store
-    const config = await store.getConfig()
-    return expressOk(res, config)
-  } catch (error) {
-    next(error)
-  }
-})
-
-router.post('/config', requireAdmin(), async (req, res, next) => {
-  try {
-    const { listApi, nodes, enableLocalStorage, maxUploadBytes } = req.body ?? {}
-    if (!listApi || !Array.isArray(nodes)) return expressFail(res, 400, 40001, '参数错误')
-    const listApiStr = String(listApi).trim()
-    if (!listApiStr.startsWith('/api/')) return expressFail(res, 400, 40001, '参数错误')
-    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(listApiStr)) return expressFail(res, 400, 40001, '参数错误')
-    if (maxUploadBytes !== undefined) {
-      const n = Number(maxUploadBytes)
-      if (!Number.isFinite(n)) return expressFail(res, 400, 40001, '参数错误')
-    }
-    const hasEnabledNode = nodes.some((node) => node && node.enabled !== false)
-    if (enableLocalStorage === true && hasEnabledNode) {
-      return expressFail(res, 400, 40003, '本地存储与存储节点不可同时启用')
-    }
-    const store = req.app.locals.store
-    const prev = await store.getConfig()
-    const prevNodes = Array.isArray(prev?.nodes) ? prev.nodes : []
-    await syncNewNodes(prevNodes, nodes)
-    await store.saveConfig(listApiStr, nodes, enableLocalStorage === true, maxUploadBytes)
-    return expressOk(res, null)
-  } catch (error) {
-    next(error)
-  }
-})
-
-router.post('/config/sync', requireAdmin(), async (req, res, next) => {
-  try {
-    const { fromId, toId } = req.body ?? {}
-    const from = String(fromId ?? '').trim()
-    const to = String(toId ?? '').trim()
-    if (!from || !to || from === to) return expressFail(res, 400, 40001, '参数错误')
-    const store = req.app.locals.store
-    const config = await store.getConfig()
-    const nodes = Array.isArray(config?.nodes) ? config.nodes : []
-    const sourceNode = nodes.find((n) => String(n?.id ?? '') === from) ?? null
-    const targetNode = nodes.find((n) => String(n?.id ?? '') === to) ?? null
-    if (!sourceNode || !targetNode) return expressFail(res, 400, 40001, '参数错误')
-    if (sourceNode.enabled === false || targetNode.enabled === false) return expressFail(res, 400, 40002, '节点未启用')
-    if (String(sourceNode?.type ?? 'picmi-node') !== 'picmi-node' || String(targetNode?.type ?? 'picmi-node') !== 'picmi-node') {
-      return expressFail(res, 400, 40002, '节点类型不支持')
-    }
-    if (String(sourceNode?.address ?? '').trim() === String(targetNode?.address ?? '').trim()) return expressFail(res, 400, 40002, '节点地址重复')
-    await syncPicmiNode(sourceNode, targetNode)
-    return expressOk(res, null)
-  } catch (error) {
-    next(error)
-  }
-})
-
-const normalizeHttpBase = (address) => {
+const normalizeHttpBase = (address: any) => {
   const raw = String(address ?? '').trim()
   if (!raw) return null
   const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw) ? raw : `http://${raw}`
@@ -84,12 +20,14 @@ const normalizeHttpBase = (address) => {
   }
 }
 
-const buildAuthHeaders = (node) => {
+const buildAuthHeaders = (node: any): Record<string, string> => {
   const token = String(node?.password ?? '').trim()
-  return token ? { authorization: `Bearer ${token}` } : {}
+  const headers: Record<string, string> = {}
+  if (token) headers.authorization = `Bearer ${token}`
+  return headers
 }
 
-const joinNodePath = (root, rel) => {
+const joinNodePath = (root: any, rel: any) => {
   const rootNorm = normalizePath(root || '/')
   const relNorm = normalizePath(rel || '/')
   if (rootNorm === '/') return relNorm
@@ -97,7 +35,7 @@ const joinNodePath = (root, rel) => {
   return normalizePath(`${rootNorm}/${relNorm}`)
 }
 
-const toRelativePath = (fullPath, rootPath) => {
+const toRelativePath = (fullPath: any, rootPath: any) => {
   const fullNorm = normalizePath(fullPath || '/')
   const rootNorm = normalizePath(rootPath || '/')
   if (rootNorm === '/') return fullNorm
@@ -106,12 +44,12 @@ const toRelativePath = (fullPath, rootPath) => {
   return fullNorm
 }
 
-const fetchJsonData = async (url, options) => {
+const fetchJsonData = async (url: URL, options?: RequestInit) => {
   const ms = 15_000
   const signal =
-    options?.signal ??
-    (typeof AbortSignal?.timeout === 'function'
-      ? AbortSignal.timeout(ms)
+    (options as any)?.signal ??
+    (typeof (AbortSignal as any)?.timeout === 'function'
+      ? (AbortSignal as any).timeout(ms)
       : (() => {
           const controller = new AbortController()
           const t = setTimeout(() => controller.abort(), ms)
@@ -126,15 +64,15 @@ const fetchJsonData = async (url, options) => {
   return payload.data
 }
 
-const listNodeTree = async (node) => {
+const listNodeTree = async (node: any) => {
   const base = normalizeHttpBase(node?.address)
   if (!base) throw new Error('节点地址无效')
   const rootPath = normalizePath(node?.rootDir || '/')
   const headers = buildAuthHeaders(node)
-  const files = new Map()
-  const dirs = new Set(['/'])
+  const files = new Map<string, { size: any; url: any }>()
+  const dirs = new Set<string>(['/'])
 
-  const walk = async (relPath) => {
+  const walk = async (relPath: string) => {
     const nodePath = joinNodePath(rootPath, relPath)
     const url = new URL('/api/images/list', base)
     url.searchParams.set('path', nodePath)
@@ -157,7 +95,7 @@ const listNodeTree = async (node) => {
   return { base, rootPath, headers, files, dirs }
 }
 
-const createDirOnNode = async (nodeInfo, relDir) => {
+const createDirOnNode = async (nodeInfo: any, relDir: string) => {
   if (!relDir || relDir === '/') return
   const parentRel = normalizePath(path.posix.dirname(relDir))
   const name = path.posix.basename(relDir)
@@ -169,16 +107,25 @@ const createDirOnNode = async (nodeInfo, relDir) => {
       headers: { 'content-type': 'application/json', ...nodeInfo.headers },
       body: JSON.stringify(body)
     })
-  } catch (error) {
+  } catch (error: any) {
     if (!/已存在|exists/i.test(String(error?.message ?? ''))) throw error
   }
 }
 
-const uploadFileToNode = async (sourceInfo, targetInfo, relPath, sourceMeta) => {
+const uploadFileToNode = async (sourceInfo: any, targetInfo: any, relPath: string) => {
   const fileUrl = new URL(`/uploads${joinNodePath(sourceInfo.rootPath, relPath)}`, sourceInfo.base).toString()
-  const res = await fetch(fileUrl, { headers: sourceInfo.headers })
+  const signal =
+    typeof (AbortSignal as any)?.timeout === 'function'
+      ? (AbortSignal as any).timeout(15_000)
+      : (() => {
+          const controller = new AbortController()
+          const t = setTimeout(() => controller.abort(), 15_000)
+          controller.signal.addEventListener('abort', () => clearTimeout(t), { once: true })
+          return controller.signal
+        })()
+  const res = await fetch(fileUrl, { redirect: 'error', headers: sourceInfo.headers, signal })
   if (!res.ok) throw new Error(`http ${res.status}`)
-  const buf = Buffer.from(await res.arrayBuffer())
+  const buf = await readResponseBufferWithLimit(res, 1024 * 1024 * 1024)
 
   const relDir = normalizePath(path.posix.dirname(relPath))
   const fileName = path.posix.basename(relPath)
@@ -191,7 +138,7 @@ const uploadFileToNode = async (sourceInfo, targetInfo, relPath, sourceMeta) => 
   await fetchJsonData(url, { method: 'POST', headers: { ...targetInfo.headers }, body: form })
 }
 
-const deletePathsOnNode = async (nodeInfo, relPaths) => {
+const deletePathsOnNode = async (nodeInfo: any, relPaths: string[]) => {
   if (relPaths.length === 0) return
   const url = new URL('/api/images/delete', nodeInfo.base)
   const body = { paths: relPaths.map((p) => joinNodePath(nodeInfo.rootPath, p)) }
@@ -202,7 +149,7 @@ const deletePathsOnNode = async (nodeInfo, relPaths) => {
   })
 }
 
-const syncPicmiNode = async (sourceNode, targetNode) => {
+const syncPicmiNode = async (sourceNode: any, targetNode: any) => {
   const sourceInfo = await listNodeTree(sourceNode)
   const targetInfo = await listNodeTree(targetNode)
 
@@ -212,7 +159,7 @@ const syncPicmiNode = async (sourceNode, targetNode) => {
   for (const [relPath, meta] of sourceInfo.files.entries()) {
     const targetMeta = targetInfo.files.get(relPath)
     if (!targetMeta || Number(targetMeta.size) !== Number(meta?.size)) {
-      await uploadFileToNode(sourceInfo, targetInfo, relPath, meta)
+      await uploadFileToNode(sourceInfo, targetInfo, relPath)
     }
   }
 
@@ -227,24 +174,32 @@ const syncPicmiNode = async (sourceNode, targetNode) => {
   }
 }
 
-const syncNewNodes = async (prevNodes, nextNodes) => {
-  const prevIds = new Set(prevNodes.map((node) => String(node?.id ?? '')).filter(Boolean))
-  const newNodes = nextNodes.filter((node) => !prevIds.has(String(node?.id ?? '')))
-  if (newNodes.length === 0) return
+export default defineEventHandler(async (event) => {
+  const auth = await requireAdmin(event)
+  if (auth) return auth
 
-  const sourceNode = prevNodes.find((node) => node && node.enabled !== false)
-  if (!sourceNode) return
-  const sourceType = String(sourceNode?.type ?? 'picmi-node')
-  if (sourceType !== 'picmi-node') return
+  try {
+    const picmi = await usePicmi(event)
+    const body = await readBodySafe<{ fromId?: unknown; toId?: unknown }>(event)
+    const fromId = String(body?.fromId ?? '').trim()
+    const toId = String(body?.toId ?? '').trim()
+    if (!fromId || !toId || fromId === toId) return fail(event, 400, 40001, '参数错误')
 
-  for (const node of newNodes) {
-    if (!node || node.enabled === false) continue
-    const type = String(node?.type ?? 'picmi-node')
-    if (type !== 'picmi-node') continue
-    if (String(node?.address ?? '').trim() === String(sourceNode?.address ?? '').trim()) continue
-    await syncPicmiNode(sourceNode, node)
+    const config = await picmi.store.getConfig()
+    const nodes = Array.isArray(config?.nodes) ? config.nodes : []
+    const sourceNode = nodes.find((n: any) => String(n?.id ?? '') === fromId) ?? null
+    const targetNode = nodes.find((n: any) => String(n?.id ?? '') === toId) ?? null
+    if (!sourceNode || !targetNode) return fail(event, 400, 40001, '参数错误')
+    if (sourceNode.enabled === false || targetNode.enabled === false) return fail(event, 400, 40002, '节点未启用')
+    if (String(sourceNode?.type ?? 'picmi-node') !== 'picmi-node' || String(targetNode?.type ?? 'picmi-node') !== 'picmi-node') {
+      return fail(event, 400, 40002, '节点类型不支持')
+    }
+    if (String(sourceNode?.address ?? '').trim() === String(targetNode?.address ?? '').trim()) return fail(event, 400, 40002, '节点地址重复')
+
+    await syncPicmiNode(sourceNode, targetNode)
+    return ok(null)
+  } catch {
+    return fail(event, 500, 1, '服务异常')
   }
-}
+})
 
-export const basePath = '/api'
-export { router }

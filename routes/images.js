@@ -57,10 +57,24 @@ const joinNodePath = (root, rel) => {
   return normalizePath(`${rootNorm}/${relNorm}`)
 }
 
+const toRelativePath = (fullPath, rootPath) => {
+  const fullNorm = normalizePath(fullPath || '/')
+  const rootNorm = normalizePath(rootPath || '/')
+  if (rootNorm === '/') return fullNorm
+  if (fullNorm === rootNorm) return '/'
+  if (fullNorm.startsWith(`${rootNorm}/`)) return normalizePath(fullNorm.slice(rootNorm.length))
+  return fullNorm
+}
+
 const pickEnabledPicmiNode = (nodes) => {
   const list = Array.isArray(nodes) ? nodes : []
   const enabled = list.filter((n) => n && n.enabled !== false)
   return enabled.find((n) => String(n?.type ?? 'picmi-node') === 'picmi-node') ?? null
+}
+
+const listEnabledPicmiNodes = (nodes) => {
+  const list = Array.isArray(nodes) ? nodes : []
+  return list.filter((n) => n && n.enabled !== false && String(n?.type ?? 'picmi-node') === 'picmi-node')
 }
 
 const fetchNodePayload = async (url, options, timeoutMs = 15_000) => {
@@ -212,13 +226,88 @@ const scanRecentLocal = async (root, limit) => {
   return { items: top, truncated: scannedFiles >= maxFiles || scannedDirs >= maxDirs }
 }
 
+const scanRecentNode = async (node, rootPath, limit) => {
+  const top = []
+  const base = normalizeHttpBase(node?.address)
+  if (!base) throw new Error('invalid node')
+  const headers = buildNodeAuthHeaders(node)
+  const visited = new Set()
+  const stack = ['/']
+  const maxDirs = 2000
+  const maxItems = 50000
+  let scannedDirs = 0
+  let scannedItems = 0
+
+  while (stack.length && scannedDirs < maxDirs && scannedItems < maxItems) {
+    const rel = stack.pop()
+    if (visited.has(rel)) continue
+    visited.add(rel)
+    scannedDirs += 1
+    const url = new URL('/api/images/list', base)
+    url.searchParams.set('path', joinNodePath(rootPath, rel))
+    const { res, payload } = await fetchNodePayload(url, { headers })
+    if (!res || !res.ok) continue
+    const data = payload && typeof payload === 'object' && 'data' in payload ? payload.data : null
+    const items = Array.isArray(data?.items) ? data.items : []
+    for (const item of items) {
+      if (item?.type === 'folder') {
+        const nextRel = toRelativePath(item?.path, rootPath)
+        stack.push(nextRel)
+        continue
+      }
+      if (item?.type !== 'image') continue
+      scannedItems += 1
+      if (scannedItems > maxItems) break
+      const relPath = toRelativePath(item?.path, rootPath)
+      const type = isImageFileName(item?.name) ? 'image' : 'file'
+      pushTop(top, { ...item, type, path: relPath, url: `/api/images/raw?path=${encodeURIComponent(relPath)}` }, limit)
+    }
+  }
+
+  return { items: top, truncated: scannedDirs >= maxDirs || scannedItems >= maxItems }
+}
+
 router.get('/images/recent', requireAuth(), async (req, res, next) => {
   try {
     const store = req.app.locals.store
     if (!(await hasStorageAvailable(store))) return expressOk(res, { items: [] })
     const config = await store.getConfig()
     const nodes = Array.isArray(config?.nodes) ? config.nodes : []
-    if (nodes.length > 0) return expressOk(res, { items: [] })
+    const enabledNodes = listEnabledPicmiNodes(nodes)
+    if (enabledNodes.length > 0) {
+      const limitRaw = Number(req.query?.limit)
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(60, Math.floor(limitRaw))) : 6
+      const merged = new Map()
+      let truncated = false
+      let okCount = 0
+      let errorCount = 0
+      for (const node of enabledNodes) {
+        const rootPath = normalizePath(node?.rootDir || '/')
+        try {
+          const data = await scanRecentNode(node, rootPath, limit)
+          okCount += 1
+          truncated = truncated || Boolean(data?.truncated)
+          const items = Array.isArray(data?.items) ? data.items : []
+          for (const it of items) {
+            const rel = String(it?.path ?? '')
+            if (!rel) continue
+            const prev = merged.get(rel)
+            if (!prev) merged.set(rel, it)
+            else {
+              const prevAt = String(prev?.uploadedAt ?? '')
+              const nextAt = String(it?.uploadedAt ?? '')
+              if (nextAt && (!prevAt || nextAt.localeCompare(prevAt) > 0)) merged.set(rel, it)
+            }
+          }
+        } catch {
+          errorCount += 1
+        }
+      }
+      const top = []
+      for (const it of merged.values()) pushTop(top, it, limit)
+      const nodeError = okCount === 0 ? '节点不可达' : (errorCount > 0 ? '部分节点不可达' : undefined)
+      return expressOk(res, { items: top, truncated, nodeError })
+    }
     const root = path.resolve(rootDir, req.app.locals.config.storageRoot)
     const limitRaw = Number(req.query?.limit)
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(60, Math.floor(limitRaw))) : 6
@@ -242,7 +331,55 @@ router.get('/images/list', requireAuth({
     const config = await store.getConfig()
     const nodes = Array.isArray(config?.nodes) ? config.nodes : []
     const currentPath = normalizePath(req.query?.path ?? '/')
-    if (nodes.length > 0) return expressOk(res, { path: currentPath, items: [] })
+    const enabledNodes = listEnabledPicmiNodes(nodes)
+    if (enabledNodes.length > 0) {
+      const merged = new Map()
+      let okCount = 0
+      let errorCount = 0
+      for (const node of enabledNodes) {
+        const base = normalizeHttpBase(node?.address)
+        if (!base) {
+          errorCount += 1
+          continue
+        }
+        const url = new URL('/api/images/list', base)
+        url.searchParams.set('path', joinNodePath(node?.rootDir || '/', currentPath))
+        const { res: nodeRes, payload } = await fetchNodePayload(url, { headers: { ...buildNodeAuthHeaders(node) } })
+        if (!nodeRes || !payload || typeof payload !== 'object' || Number(payload?.code) !== 0 || !nodeRes.ok) {
+          errorCount += 1
+          continue
+        }
+        const data = payload && typeof payload === 'object' && 'data' in payload ? payload.data : null
+        if (!data) {
+          errorCount += 1
+          continue
+        }
+        okCount += 1
+        const rootPath = normalizePath(node?.rootDir || '/')
+        const items = Array.isArray(data.items) ? data.items : []
+        for (const it of items) {
+          const rel = toRelativePath(it?.path, rootPath)
+          if (!rel) continue
+          if (it?.type === 'folder') {
+            if (!merged.has(rel)) merged.set(rel, { ...it, path: rel })
+            continue
+          }
+          const kind = isImageFileName(it?.name) ? 'image' : 'file'
+          const next = { ...it, type: kind, path: rel, url: `/api/images/raw?path=${encodeURIComponent(rel)}` }
+          const prev = merged.get(rel)
+          if (!prev) {
+            merged.set(rel, next)
+            continue
+          }
+          const prevAt = String(prev?.uploadedAt ?? '')
+          const nextAt = String(next?.uploadedAt ?? '')
+          if (nextAt && (!prevAt || nextAt.localeCompare(prevAt) > 0)) merged.set(rel, next)
+        }
+      }
+      const items = [...merged.values()]
+      const nodeError = okCount === 0 ? '节点不可达' : (errorCount > 0 ? '部分节点不可达' : undefined)
+      return expressOk(res, { path: currentPath, items, nodeError })
+    }
     const root = path.resolve(rootDir, req.app.locals.config.storageRoot)
     const data = await listEntries(root, currentPath)
     return expressOk(res, data)
@@ -267,42 +404,46 @@ router.get('/images/raw', requireAuth({
     if (!relPath || relPath === '/') return expressFail(res, 400, 40001, '参数错误')
     const config = await store.getConfig()
     const nodes = Array.isArray(config?.nodes) ? config.nodes : []
-    const hasEnabledNode = nodes.some((node) => node && node.enabled !== false)
-    if (hasEnabledNode) {
-      const node = pickEnabledPicmiNode(nodes)
-      if (!node) return expressFail(res, 400, 40002, '未配置可用存储节点')
-      const base = normalizeHttpBase(node?.address)
-      if (!base) return expressFail(res, 400, 40002, '节点地址无效')
-      const nodePath = joinNodePath(node?.rootDir || '/', relPath)
-      const url = new URL(`/uploads${nodePath}`, base)
-      const controller = new AbortController()
-      const t = setTimeout(() => controller.abort(), 15_000)
-      let nodeRes
-      try {
-        nodeRes = await fetch(url, { redirect: 'error', headers: { ...buildNodeAuthHeaders(node) }, signal: controller.signal })
-      } catch {
-        return expressFail(res, 502, 50201, '节点不可达')
-      } finally {
-        clearTimeout(t)
-      }
-      if (!nodeRes?.ok) {
-        if (nodeRes?.status === 404) return expressFail(res, 404, 40401, '文件不存在')
-        return expressFail(res, 502, 50201, `节点访问失败(${nodeRes?.status || 502})`)
-      }
-      const contentType = nodeRes.headers.get('content-type')
-      if (contentType) res.setHeader('content-type', contentType)
-      const cacheControl = nodeRes.headers.get('cache-control')
-      if (cacheControl) res.setHeader('cache-control', cacheControl)
-      const lastModified = nodeRes.headers.get('last-modified')
-      if (lastModified) res.setHeader('last-modified', lastModified)
-      const etag = nodeRes.headers.get('etag')
-      if (etag) res.setHeader('etag', etag)
+    const enabledNodes = listEnabledPicmiNodes(nodes)
+    if (enabledNodes.length > 0) {
       const name = path.posix.basename(relPath)
       const asciiName = name.replace(/[\r\n]/g, '').replace(/"/g, '').replace(/[\\/]/g, '').replace(/[^\x20-\x7E]/g, '_')
       const utf8Name = encodeURIComponent(name).replace(/%20/g, ' ')
       res.setHeader('content-disposition', `inline; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`)
-      const buf = Buffer.from(await nodeRes.arrayBuffer())
-      return res.status(200).send(buf)
+      let sawReachable = false
+      for (const node of enabledNodes) {
+        const base = normalizeHttpBase(node?.address)
+        if (!base) continue
+        const nodePath = joinNodePath(node?.rootDir || '/', relPath)
+        const url = new URL(`/uploads${nodePath}`, base)
+        const controller = new AbortController()
+        const t = setTimeout(() => controller.abort(), 15_000)
+        let nodeRes
+        try {
+          nodeRes = await fetch(url, { redirect: 'error', headers: { ...buildNodeAuthHeaders(node) }, signal: controller.signal })
+        } catch {
+          continue
+        } finally {
+          clearTimeout(t)
+        }
+        sawReachable = true
+        if (!nodeRes?.ok) {
+          if (nodeRes?.status === 404) continue
+          continue
+        }
+        const contentType = nodeRes.headers.get('content-type')
+        if (contentType) res.setHeader('content-type', contentType)
+        const cacheControl = nodeRes.headers.get('cache-control')
+        if (cacheControl) res.setHeader('cache-control', cacheControl)
+        const lastModified = nodeRes.headers.get('last-modified')
+        if (lastModified) res.setHeader('last-modified', lastModified)
+        const etag = nodeRes.headers.get('etag')
+        if (etag) res.setHeader('etag', etag)
+        const buf = Buffer.from(await nodeRes.arrayBuffer())
+        return res.status(200).send(buf)
+      }
+      if (sawReachable) return expressFail(res, 404, 40401, '文件不存在')
+      return expressFail(res, 502, 50201, '节点不可达')
     }
 
     const root = path.resolve(rootDir, req.app.locals.config.storageRoot)
@@ -323,10 +464,34 @@ router.get('/images/raw', requireAuth({
 
 router.get('/images/exists', requireAuth(), async (req, res, next) => {
   try {
+    const store = req.app.locals.store
+    const config = await store.getConfig()
+    const enableLocalStorage = config?.enableLocalStorage === true
+    const nodes = Array.isArray(config?.nodes) ? config.nodes : []
+    const enabledNodes = listEnabledPicmiNodes(nodes)
     const root = path.resolve(rootDir, req.app.locals.config.storageRoot)
     const currentPath = normalizePath(req.query?.path ?? '/')
     const filename = String(req.query?.filename ?? '')
     if (!filename) return expressFail(res, 400, 40001, '参数错误')
+
+    if (!enableLocalStorage && enabledNodes.length > 0) {
+      let okCount = 0
+      for (const node of enabledNodes) {
+        const base = normalizeHttpBase(node?.address)
+        if (!base) continue
+        const url = new URL('/api/images/exists', base)
+        url.searchParams.set('path', joinNodePath(node?.rootDir || '/', currentPath))
+        url.searchParams.set('filename', filename)
+        const { res: nodeRes, payload } = await fetchNodePayload(url, { headers: { ...buildNodeAuthHeaders(node) } })
+        if (!nodeRes || !payload || typeof payload !== 'object' || !nodeRes.ok) continue
+        okCount += 1
+        const data = payload && typeof payload === 'object' && 'data' in payload ? payload.data : null
+        if (data?.exists) return expressOk(res, { exists: true })
+      }
+      if (okCount > 0) return expressOk(res, { exists: false })
+      return expressFail(res, 502, 50201, '节点不可达')
+    }
+
     const { target } = resolvePath(root, path.posix.join(currentPath, filename))
     const exists = fsSync.existsSync(target)
     return expressOk(res, { exists })
@@ -337,10 +502,38 @@ router.get('/images/exists', requireAuth(), async (req, res, next) => {
 
 router.post('/images/mkdir', requireAuth(), async (req, res, next) => {
   try {
+    const store = req.app.locals.store
+    const config = await store.getConfig()
+    const enableLocalStorage = config?.enableLocalStorage === true
+    const nodes = Array.isArray(config?.nodes) ? config.nodes : []
     const root = path.resolve(rootDir, req.app.locals.config.storageRoot)
     const { path: currentPath, name } = req.body ?? {}
     const safeName = sanitizeSingleName(name)
     if (!safeName) return expressFail(res, 400, 40001, '参数错误')
+
+    if (!enableLocalStorage) {
+      const enabledNodes = listEnabledPicmiNodes(nodes)
+      if (enabledNodes.length === 0) return expressFail(res, 400, 40002, '未配置可用存储节点')
+      let firstPayload = null
+      for (const node of enabledNodes) {
+        const base = normalizeHttpBase(node?.address)
+        if (!base) return expressFail(res, 400, 40002, '节点地址无效')
+        const url = new URL('/api/images/mkdir', base)
+        const bodyOut = { path: joinNodePath(node?.rootDir || '/', normalizePath(currentPath ?? '/')), name: safeName }
+        const { res: nodeRes, payload } = await fetchNodePayload(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...buildNodeAuthHeaders(node) },
+          body: JSON.stringify(bodyOut)
+        })
+        if (!nodeRes) return expressFail(res, 502, 50201, '节点不可达')
+        if (!payload || typeof payload !== 'object') return expressFail(res, 502, 50201, '节点响应异常')
+        if (!nodeRes.ok || Number(payload?.code) !== 0) {
+          return expressFail(res, nodeRes.status, Number(payload?.code) || 1, String(payload?.message || `http ${nodeRes.status}`))
+        }
+        if (!firstPayload) firstPayload = payload
+      }
+      return res.status(200).json(firstPayload ?? { code: 0, message: 'ok', data: null })
+    }
     
     const { target } = resolvePath(root, path.posix.join(normalizePath(currentPath ?? '/'), safeName))
     if (fsSync.existsSync(target)) return expressFail(res, 409, 40901, '文件夹已存在')
@@ -371,23 +564,27 @@ router.post('/images/upload', requireAuth(), uploadSingle, async (req, res, next
     if (!check.ok) return expressFail(res, 415, 41501, check.message)
 
     if (!enableLocalStorage) {
-      const node = pickEnabledPicmiNode(nodes)
-      if (!node) return expressFail(res, 400, 40002, '未配置可用存储节点')
-      const base = normalizeHttpBase(node?.address)
-      if (!base) return expressFail(res, 400, 40002, '节点地址无效')
-      const nodeDir = joinNodePath(node?.rootDir || '/', currentPath)
-      const formOut = new FormData()
-      formOut.set('path', nodeDir)
-      formOut.set('override', override ? '1' : '0')
-      formOut.set('file', new Blob([file.buffer]), safeName)
-      const url = new URL('/api/images/upload', base)
-      const { res: nodeRes, payload } = await fetchNodePayload(url, { method: 'POST', headers: { ...buildNodeAuthHeaders(node) }, body: formOut })
-      if (!nodeRes) return expressFail(res, 502, 50201, '节点不可达')
-      if (!payload || typeof payload !== 'object') return expressFail(res, 502, 50201, '节点响应异常')
-      if (!nodeRes.ok || Number(payload?.code) !== 0) {
-        return expressFail(res, nodeRes.status, Number(payload?.code) || 1, String(payload?.message || `http ${nodeRes.status}`))
+      const enabledNodes = listEnabledPicmiNodes(nodes)
+      if (enabledNodes.length === 0) return expressFail(res, 400, 40002, '未配置可用存储节点')
+      let firstPayload = null
+      for (const node of enabledNodes) {
+        const base = normalizeHttpBase(node?.address)
+        if (!base) return expressFail(res, 400, 40002, '节点地址无效')
+        const nodeDir = joinNodePath(node?.rootDir || '/', currentPath)
+        const formOut = new FormData()
+        formOut.set('path', nodeDir)
+        formOut.set('override', override ? '1' : '0')
+        formOut.set('file', new Blob([file.buffer]), safeName)
+        const url = new URL('/api/images/upload', base)
+        const { res: nodeRes, payload } = await fetchNodePayload(url, { method: 'POST', headers: { ...buildNodeAuthHeaders(node) }, body: formOut })
+        if (!nodeRes) return expressFail(res, 502, 50201, '节点不可达')
+        if (!payload || typeof payload !== 'object') return expressFail(res, 502, 50201, '节点响应异常')
+        if (!nodeRes.ok || Number(payload?.code) !== 0) {
+          return expressFail(res, nodeRes.status, Number(payload?.code) || 1, String(payload?.message || `http ${nodeRes.status}`))
+        }
+        if (!firstPayload) firstPayload = payload
       }
-      return res.status(200).json(payload)
+      return res.status(200).json(firstPayload ?? { code: 0, message: 'ok', data: null })
     }
 
     const root = path.resolve(rootDir, req.app.locals.config.storageRoot)
@@ -423,24 +620,28 @@ router.post('/images/upload-base64', requireAuth(), async (req, res, next) => {
     if (!check.ok) return expressFail(res, 415, 41501, check.message)
 
     if (!enableLocalStorage) {
-      const node = pickEnabledPicmiNode(nodes)
-      if (!node) return expressFail(res, 400, 40002, '未配置可用存储节点')
-      const base = normalizeHttpBase(node?.address)
-      if (!base) return expressFail(res, 400, 40002, '节点地址无效')
-      const nodeDir = joinNodePath(node?.rootDir || '/', normalizedCurrentPath)
-      const url = new URL('/api/images/upload-base64', base)
-      const bodyOut = { path: nodeDir, filename: safeName, base64: rawBase64 }
-      const { res: nodeRes, payload } = await fetchNodePayload(url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', ...buildNodeAuthHeaders(node) },
-        body: JSON.stringify(bodyOut)
-      })
-      if (!nodeRes) return expressFail(res, 502, 50201, '节点不可达')
-      if (!payload || typeof payload !== 'object') return expressFail(res, 502, 50201, '节点响应异常')
-      if (!nodeRes.ok || Number(payload?.code) !== 0) {
-        return expressFail(res, nodeRes.status, Number(payload?.code) || 1, String(payload?.message || `http ${nodeRes.status}`))
+      const enabledNodes = listEnabledPicmiNodes(nodes)
+      if (enabledNodes.length === 0) return expressFail(res, 400, 40002, '未配置可用存储节点')
+      let firstPayload = null
+      for (const node of enabledNodes) {
+        const base = normalizeHttpBase(node?.address)
+        if (!base) return expressFail(res, 400, 40002, '节点地址无效')
+        const nodeDir = joinNodePath(node?.rootDir || '/', normalizedCurrentPath)
+        const url = new URL('/api/images/upload-base64', base)
+        const bodyOut = { path: nodeDir, filename: safeName, base64: rawBase64 }
+        const { res: nodeRes, payload } = await fetchNodePayload(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...buildNodeAuthHeaders(node) },
+          body: JSON.stringify(bodyOut)
+        })
+        if (!nodeRes) return expressFail(res, 502, 50201, '节点不可达')
+        if (!payload || typeof payload !== 'object') return expressFail(res, 502, 50201, '节点响应异常')
+        if (!nodeRes.ok || Number(payload?.code) !== 0) {
+          return expressFail(res, nodeRes.status, Number(payload?.code) || 1, String(payload?.message || `http ${nodeRes.status}`))
+        }
+        if (!firstPayload) firstPayload = payload
       }
-      return res.status(200).json(payload)
+      return res.status(200).json(firstPayload ?? { code: 0, message: 'ok', data: null })
     }
 
     const root = path.resolve(rootDir, req.app.locals.config.storageRoot)
@@ -455,9 +656,38 @@ router.post('/images/upload-base64', requireAuth(), async (req, res, next) => {
 
 router.post('/images/delete', requireAuth(), async (req, res, next) => {
   try {
+    const store = req.app.locals.store
+    const config = await store.getConfig()
+    const enableLocalStorage = config?.enableLocalStorage === true
+    const nodes = Array.isArray(config?.nodes) ? config.nodes : []
     const root = path.resolve(rootDir, req.app.locals.config.storageRoot)
     const { paths } = req.body ?? {}
     if (!Array.isArray(paths)) return expressFail(res, 400, 40001, '参数错误')
+
+    if (!enableLocalStorage) {
+      const enabledNodes = listEnabledPicmiNodes(nodes)
+      if (enabledNodes.length === 0) return expressFail(res, 400, 40002, '未配置可用存储节点')
+      let firstPayload = null
+      for (const node of enabledNodes) {
+        const base = normalizeHttpBase(node?.address)
+        if (!base) return expressFail(res, 400, 40002, '节点地址无效')
+        const url = new URL('/api/images/delete', base)
+        const bodyOut = { paths: paths.map((p) => joinNodePath(node?.rootDir || '/', p)) }
+        const { res: nodeRes, payload } = await fetchNodePayload(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...buildNodeAuthHeaders(node) },
+          body: JSON.stringify(bodyOut)
+        })
+        if (!nodeRes) return expressFail(res, 502, 50201, '节点不可达')
+        if (!payload || typeof payload !== 'object') return expressFail(res, 502, 50201, '节点响应异常')
+        if (!nodeRes.ok || Number(payload?.code) !== 0) {
+          return expressFail(res, nodeRes.status, Number(payload?.code) || 1, String(payload?.message || `http ${nodeRes.status}`))
+        }
+        if (!firstPayload) firstPayload = payload
+      }
+      return res.status(200).json(firstPayload ?? { code: 0, message: 'ok', data: null })
+    }
+
     for (const p of paths) {
       const { target } = resolvePath(root, p)
       await removeRecursive(target)
@@ -470,10 +700,39 @@ router.post('/images/delete', requireAuth(), async (req, res, next) => {
 
 router.post('/images/rename', requireAuth(), async (req, res, next) => {
   try {
+    const store = req.app.locals.store
+    const config = await store.getConfig()
+    const enableLocalStorage = config?.enableLocalStorage === true
+    const nodes = Array.isArray(config?.nodes) ? config.nodes : []
     const root = path.resolve(rootDir, req.app.locals.config.storageRoot)
     const { path: current, newName } = req.body ?? {}
     const safeName = sanitizeSingleName(newName)
     if (!current || !safeName) return expressFail(res, 400, 40001, '参数错误')
+
+    if (!enableLocalStorage) {
+      const enabledNodes = listEnabledPicmiNodes(nodes)
+      if (enabledNodes.length === 0) return expressFail(res, 400, 40002, '未配置可用存储节点')
+      let firstPayload = null
+      for (const node of enabledNodes) {
+        const base = normalizeHttpBase(node?.address)
+        if (!base) return expressFail(res, 400, 40002, '节点地址无效')
+        const url = new URL('/api/images/rename', base)
+        const bodyOut = { path: joinNodePath(node?.rootDir || '/', current), newName: safeName }
+        const { res: nodeRes, payload } = await fetchNodePayload(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...buildNodeAuthHeaders(node) },
+          body: JSON.stringify(bodyOut)
+        })
+        if (!nodeRes) return expressFail(res, 502, 50201, '节点不可达')
+        if (!payload || typeof payload !== 'object') return expressFail(res, 502, 50201, '节点响应异常')
+        if (!nodeRes.ok || Number(payload?.code) !== 0) {
+          return expressFail(res, nodeRes.status, Number(payload?.code) || 1, String(payload?.message || `http ${nodeRes.status}`))
+        }
+        if (!firstPayload) firstPayload = payload
+      }
+      return res.status(200).json(firstPayload ?? { code: 0, message: 'ok', data: null })
+    }
+
     const { target, normalized } = resolvePath(root, current)
     const nextNormalized = path.posix.join(path.posix.dirname(normalized), safeName)
     const next = resolvePath(root, nextNormalized).target
@@ -486,10 +745,42 @@ router.post('/images/rename', requireAuth(), async (req, res, next) => {
 
 router.post('/images/move', requireAuth(), async (req, res, next) => {
   try {
+    const store = req.app.locals.store
+    const config = await store.getConfig()
+    const enableLocalStorage = config?.enableLocalStorage === true
+    const nodes = Array.isArray(config?.nodes) ? config.nodes : []
     const root = path.resolve(rootDir, req.app.locals.config.storageRoot)
     const { toPath, items } = req.body ?? {}
     if (!Array.isArray(items)) return expressFail(res, 400, 40001, '参数错误')
     const dest = normalizePath(toPath ?? '/')
+
+    if (!enableLocalStorage) {
+      const enabledNodes = listEnabledPicmiNodes(nodes)
+      if (enabledNodes.length === 0) return expressFail(res, 400, 40002, '未配置可用存储节点')
+      let firstPayload = null
+      for (const node of enabledNodes) {
+        const base = normalizeHttpBase(node?.address)
+        if (!base) return expressFail(res, 400, 40002, '节点地址无效')
+        const url = new URL('/api/images/move', base)
+        const bodyOut = {
+          toPath: joinNodePath(node?.rootDir || '/', dest),
+          items: items.map((it) => ({ path: joinNodePath(node?.rootDir || '/', it.path) }))
+        }
+        const { res: nodeRes, payload } = await fetchNodePayload(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...buildNodeAuthHeaders(node) },
+          body: JSON.stringify(bodyOut)
+        })
+        if (!nodeRes) return expressFail(res, 502, 50201, '节点不可达')
+        if (!payload || typeof payload !== 'object') return expressFail(res, 502, 50201, '节点响应异常')
+        if (!nodeRes.ok || Number(payload?.code) !== 0) {
+          return expressFail(res, nodeRes.status, Number(payload?.code) || 1, String(payload?.message || `http ${nodeRes.status}`))
+        }
+        if (!firstPayload) firstPayload = payload
+      }
+      return res.status(200).json(firstPayload ?? { code: 0, message: 'ok', data: null })
+    }
+
     for (const item of items) {
       const from = resolvePath(root, item.path).target
       const target = resolvePath(root, path.posix.join(dest, path.basename(from))).target
@@ -504,10 +795,42 @@ router.post('/images/move', requireAuth(), async (req, res, next) => {
 
 router.post('/images/copy', requireAuth(), async (req, res, next) => {
   try {
+    const store = req.app.locals.store
+    const config = await store.getConfig()
+    const enableLocalStorage = config?.enableLocalStorage === true
+    const nodes = Array.isArray(config?.nodes) ? config.nodes : []
     const root = path.resolve(rootDir, req.app.locals.config.storageRoot)
     const { toPath, items } = req.body ?? {}
     if (!Array.isArray(items)) return expressFail(res, 400, 40001, '参数错误')
     const dest = normalizePath(toPath ?? '/')
+
+    if (!enableLocalStorage) {
+      const enabledNodes = listEnabledPicmiNodes(nodes)
+      if (enabledNodes.length === 0) return expressFail(res, 400, 40002, '未配置可用存储节点')
+      let firstPayload = null
+      for (const node of enabledNodes) {
+        const base = normalizeHttpBase(node?.address)
+        if (!base) return expressFail(res, 400, 40002, '节点地址无效')
+        const url = new URL('/api/images/copy', base)
+        const bodyOut = {
+          toPath: joinNodePath(node?.rootDir || '/', dest),
+          items: items.map((it) => ({ path: joinNodePath(node?.rootDir || '/', it.path) }))
+        }
+        const { res: nodeRes, payload } = await fetchNodePayload(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...buildNodeAuthHeaders(node) },
+          body: JSON.stringify(bodyOut)
+        })
+        if (!nodeRes) return expressFail(res, 502, 50201, '节点不可达')
+        if (!payload || typeof payload !== 'object') return expressFail(res, 502, 50201, '节点响应异常')
+        if (!nodeRes.ok || Number(payload?.code) !== 0) {
+          return expressFail(res, nodeRes.status, Number(payload?.code) || 1, String(payload?.message || `http ${nodeRes.status}`))
+        }
+        if (!firstPayload) firstPayload = payload
+      }
+      return res.status(200).json(firstPayload ?? { code: 0, message: 'ok', data: null })
+    }
+
     for (const item of items) {
       const from = resolvePath(root, item.path).target
       const target = resolvePath(root, path.posix.join(dest, path.basename(from))).target

@@ -22,10 +22,16 @@
 
     <n-card title="存储节点" size="small" :bordered="false" class="rounded-xl shadow-sm">
        <template #header-extra>
-         <n-button size="small" secondary @click="openEditor(null)">
-           <template #icon><n-icon :component="AddOutline" /></template>
-           添加节点
-         </n-button>
+         <div class="flex items-center gap-2">
+           <n-button size="small" secondary :disabled="syncNodeOptions.length < 2" @click="openSync">
+             <template #icon><n-icon :component="SyncOutline" /></template>
+             增量同步
+           </n-button>
+           <n-button size="small" secondary @click="openEditor(null)">
+             <template #icon><n-icon :component="AddOutline" /></template>
+             添加节点
+           </n-button>
+         </div>
        </template>
        
        <div v-if="nodes.length === 0" class="w-full py-12 flex flex-col items-center justify-center text-zinc-400">
@@ -161,6 +167,34 @@
           </div>
        </template>
     </n-modal>
+
+    <n-modal
+      v-model:show="syncOpen"
+      preset="card"
+      title="增量同步"
+      class="w-full max-w-lg"
+      :segmented="{ content: 'soft', footer: 'soft' }"
+      size="large"
+      :bordered="false"
+    >
+      <div class="text-sm text-zinc-600">
+        将从源节点镜像到目标节点；目标端多余文件/目录会被删除。
+      </div>
+      <n-form label-placement="top" class="mt-4">
+        <n-form-item label="源节点">
+          <n-select v-model:value="syncFromId" :options="syncNodeOptions" class="w-full" />
+        </n-form-item>
+        <n-form-item label="目标节点">
+          <n-select v-model:value="syncToId" :options="syncNodeOptions" class="w-full" />
+        </n-form-item>
+      </n-form>
+      <template #footer>
+        <div class="flex justify-end gap-3">
+          <n-button :disabled="syncing" @click="syncOpen = false">取消</n-button>
+          <n-button type="primary" :loading="syncing" :disabled="!syncFromId || !syncToId || syncFromId === syncToId" @click="runSync">开始同步</n-button>
+        </div>
+      </template>
+    </n-modal>
   </div>
 </template>
 
@@ -175,6 +209,7 @@ import {
   ServerOutline, 
   CloudOutline, 
   GlobeOutline, 
+  SyncOutline,
   CreateOutline, 
   TrashOutline 
 } from '@vicons/ionicons5'
@@ -431,5 +466,44 @@ const askRemoveNode = (id: string) => {
       await saveConfig()
     }
   })
+}
+
+const syncOpen = ref(false)
+const syncing = ref(false)
+const syncFromId = ref<string | null>(null)
+const syncToId = ref<string | null>(null)
+
+const syncNodeOptions = computed(() => {
+  return nodes.value
+    .filter((n) => n && n.type === 'picmi-node' && n.enabled !== false)
+    .map((n) => ({ label: n.name, value: n.id }))
+})
+
+const openSync = () => {
+  const opts = syncNodeOptions.value
+  syncFromId.value = opts[0]?.value ?? null
+  syncToId.value = opts[1]?.value ?? opts[0]?.value ?? null
+  syncOpen.value = true
+}
+
+const runSync = async () => {
+  if (!syncFromId.value || !syncToId.value || syncFromId.value === syncToId.value) {
+    message.error('请选择两个不同节点')
+    return
+  }
+  syncing.value = true
+  try {
+    await apiFetch('/config/sync', {
+      method: 'POST',
+      body: { fromId: syncFromId.value, toId: syncToId.value }
+    })
+    message.success('同步完成')
+    syncOpen.value = false
+  } catch (error: any) {
+    const apiMessage = error?.data?.message || error?.response?._data?.message
+    message.error(apiMessage || '同步失败')
+  } finally {
+    syncing.value = false
+  }
 }
 </script>

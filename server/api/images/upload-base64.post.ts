@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import { rootDir } from '../../config.js'
 import { ensureDir, normalizeMaxUploadBytes, sanitizeSingleName } from '../../utils/images-fs'
 import { normalizePath, resolvePath, validateImageUpload } from '../../utils/paths.js'
-import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, normalizeHttpBase, ok, pickEnabledPicmiNode, readBodySafe, requireAuth, usePicmi } from '../../utils/nitro'
+import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, listEnabledPicmiNodes, normalizeHttpBase, ok, readBodySafe, requireAuth, usePicmi } from '../../utils/nitro'
 
 const formatNumber = (n: number, digits = 1) => {
   const s = n.toFixed(digits)
@@ -29,10 +29,10 @@ export default defineEventHandler(async (event) => {
     const config = await picmi.store.getConfig()
     const enableLocalStorage = config?.enableLocalStorage === true
     const nodes = Array.isArray(config?.nodes) ? config.nodes : []
-    const hasEnabledNode = nodes.some((node: any) => node && node.enabled !== false)
+    const enabledNodes = listEnabledPicmiNodes(nodes)
     const maxUploadBytes = normalizeMaxUploadBytes(config?.maxUploadBytes)
 
-    if (!enableLocalStorage && !hasEnabledNode) {
+    if (!enableLocalStorage && enabledNodes.length === 0) {
       return fail(event, 400, 40002, '请先配置存储节点或启用本地存储')
     }
 
@@ -61,22 +61,24 @@ export default defineEventHandler(async (event) => {
       return ok(null)
     }
 
-    const node = pickEnabledPicmiNode(nodes)
-    if (!node) return fail(event, 400, 40002, '未配置可用存储节点')
-    const base = normalizeHttpBase(node?.address)
-    if (!base) return fail(event, 400, 40002, '节点地址无效')
-    const nodePath = joinNodePath(node?.rootDir || '/', currentPath)
-    const url = new URL('/api/images/upload-base64', base)
-    const bodyOut = { path: nodePath, filename: safeName, base64: String(base64) }
-    const { res, payload } = await fetchNodePayload(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...buildNodeAuthHeaders(node) },
-      body: JSON.stringify(bodyOut)
-    })
-    if (!res) return fail(event, 502, 50201, '节点不可达')
-    if (!payload || typeof payload !== 'object') return fail(event, 502, 50201, '节点响应异常')
-    if (!res.ok) return fail(event, res.status, Number((payload as any).code) || 1, String((payload as any).message || `http ${res.status}`))
-    return payload as any
+    let firstPayload: any = null
+    for (const node of enabledNodes) {
+      const base = normalizeHttpBase(node?.address)
+      if (!base) return fail(event, 400, 40002, '节点地址无效')
+      const nodePath = joinNodePath(node?.rootDir || '/', currentPath)
+      const url = new URL('/api/images/upload-base64', base)
+      const bodyOut = { path: nodePath, filename: safeName, base64: String(base64) }
+      const { res, payload } = await fetchNodePayload(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...buildNodeAuthHeaders(node) },
+        body: JSON.stringify(bodyOut)
+      })
+      if (!res) return fail(event, 502, 50201, '节点不可达')
+      if (!payload || typeof payload !== 'object') return fail(event, 502, 50201, '节点响应异常')
+      if (!res.ok) return fail(event, res.status, Number((payload as any).code) || 1, String((payload as any).message || `http ${res.status}`))
+      if (!firstPayload) firstPayload = payload
+    }
+    return firstPayload ?? ok(null)
   } catch {
     return fail(event, 500, 1, '服务异常')
   }

@@ -3,7 +3,7 @@ import { getQuery } from 'h3'
 import { rootDir } from '../../config.js'
 import { listEntries } from '../../utils/images-fs'
 import { isImageFileName, normalizePath } from '../../utils/paths.js'
-import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, normalizeHttpBase, ok, pickEnabledPicmiNode, requireAuth, toRelativePath, usePicmi } from '../../utils/nitro'
+import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, listEnabledPicmiNodes, normalizeHttpBase, ok, requireAuth, toRelativePath, usePicmi } from '../../utils/nitro'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -19,42 +19,58 @@ export default defineEventHandler(async (event) => {
 
     const config = await picmi.store.getConfig()
     const nodes = Array.isArray(config?.nodes) ? config.nodes : []
-    const hasEnabledNode = nodes.some((node: any) => node && node.enabled !== false)
     if (nodes.length > 0) {
-      if (!hasEnabledNode) return ok({ path: currentPath, items: [], nodeError: '未配置可用存储节点' } as any)
-      const node = pickEnabledPicmiNode(nodes)
-      if (!node) return ok({ path: currentPath, items: [], nodeError: '未配置可用存储节点' } as any)
-      const base = normalizeHttpBase(node?.address)
-      if (!base) return ok({ path: currentPath, items: [], nodeError: '节点地址无效' } as any)
+      const enabledNodes = listEnabledPicmiNodes(nodes)
+      if (enabledNodes.length === 0) return ok({ path: currentPath, items: [], nodeError: '未配置可用存储节点' } as any)
 
-      const url = new URL('/api/images/list', base)
-      url.searchParams.set('path', joinNodePath(node?.rootDir || '/', currentPath))
-      const { res, payload } = await fetchNodePayload(url, { headers: { ...buildNodeAuthHeaders(node) } })
-      if (!res) return ok({ path: currentPath, items: [], nodeError: '节点不可达' } as any)
-      if (!payload || typeof payload !== 'object') return ok({ path: currentPath, items: [], nodeError: '节点响应异常' } as any)
-      if (Number((payload as any).code) !== 0) {
-        return ok({ path: currentPath, items: [], nodeError: String((payload as any).message || '节点响应异常') } as any)
-      }
-      const data = (payload && typeof payload === 'object' && 'data' in payload) ? (payload as any).data : null
-      if (!res.ok) return ok({ path: currentPath, items: [], nodeError: String((payload as any)?.message || `http ${res.status}`) } as any)
-      if (!data) return ok({ path: currentPath, items: [], nodeError: '节点响应异常' } as any)
+      const merged = new Map<string, any>()
+      let okCount = 0
+      let errorCount = 0
 
-      const rootPath = normalizePath(node?.rootDir || '/')
-      const items = Array.isArray(data.items) ? data.items : []
-      const mapped = items.map((it: any) => {
-        const rel = toRelativePath(it?.path, rootPath)
-        if (it?.type === 'image') {
-          const kind = isImageFileName(it?.name) ? 'image' : 'file'
-          return {
-            ...it,
-            type: kind,
-            path: rel,
-            url: `/api/images/raw?path=${encodeURIComponent(rel)}`
-          }
+      for (const node of enabledNodes) {
+        const base = normalizeHttpBase(node?.address)
+        if (!base) {
+          errorCount += 1
+          continue
         }
-        return { ...it, path: rel }
-      })
-      return ok({ path: toRelativePath(data.path, rootPath), items: mapped })
+        const url = new URL('/api/images/list', base)
+        url.searchParams.set('path', joinNodePath(node?.rootDir || '/', currentPath))
+        const { res, payload } = await fetchNodePayload(url, { headers: { ...buildNodeAuthHeaders(node) } })
+        if (!res || !payload || typeof payload !== 'object' || Number((payload as any).code) !== 0 || !res.ok) {
+          errorCount += 1
+          continue
+        }
+        const data = (payload && typeof payload === 'object' && 'data' in payload) ? (payload as any).data : null
+        if (!data) {
+          errorCount += 1
+          continue
+        }
+        okCount += 1
+        const rootPath = normalizePath(node?.rootDir || '/')
+        const items = Array.isArray(data.items) ? data.items : []
+        for (const it of items) {
+          const rel = toRelativePath(it?.path, rootPath)
+          if (!rel) continue
+          if (it?.type === 'folder') {
+            if (!merged.has(rel)) merged.set(rel, { ...it, path: rel })
+            continue
+          }
+          const kind = isImageFileName(it?.name) ? 'image' : 'file'
+          const next = { ...it, type: kind, path: rel, url: `/api/images/raw?path=${encodeURIComponent(rel)}` }
+          const prev = merged.get(rel)
+          if (!prev) {
+            merged.set(rel, next)
+            continue
+          }
+          const prevAt = String(prev?.uploadedAt ?? '')
+          const nextAt = String(next?.uploadedAt ?? '')
+          if (nextAt && (!prevAt || nextAt.localeCompare(prevAt) > 0)) merged.set(rel, next)
+        }
+      }
+
+      const items = [...merged.values()]
+      const nodeError = okCount === 0 ? '节点不可达' : (errorCount > 0 ? '部分节点不可达' : undefined)
+      return ok({ path: currentPath, items, nodeError } as any)
     }
 
     const root = path.resolve(rootDir, picmi.config.storageRoot)
