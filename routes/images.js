@@ -5,7 +5,7 @@ import fsSync from 'fs'
 import path from 'path'
 import { requireAuth } from '../middleware/auth.js'
 import { expressOk, expressFail } from '../server/utils/http.js'
-import { isImageFileName, normalizeMaxUploadBytesBasic as normalizeMaxUploadBytes, normalizePath, normalizeUploadFileName, resolvePath, sanitizeSingleNameBasic as sanitizeSingleName, toUrlPath, validateImageUpload } from '../server/utils/paths.js'
+import { isImageFileName, normalizeMaxUploadBytesBasic as normalizeMaxUploadBytes, normalizePath, normalizeUploadFileName, resolvePath, sanitizeSingleNameBasic as sanitizeSingleName, validateImageUpload } from '../server/utils/paths.js'
 import { rootDir } from '../server/config.js'
 
 const router = Router()
@@ -77,6 +77,18 @@ const listEnabledPicmiNodes = (nodes) => {
   return list.filter((n) => n && n.enabled !== false && String(n?.type ?? 'picmi-node') === 'picmi-node')
 }
 
+const encodePathForRaw = (relPath) => {
+  return String(relPath)
+    .replace(/^\/+/, '')
+    .split('/')
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join('/')
+}
+
+const buildRawUrl = (relPath) => `/raw/${encodePathForRaw(relPath)}`
+const buildThumbUrl = (relPath) => `/thumb/${encodePathForRaw(relPath)}`
+
 const fetchNodePayload = async (url, options, timeoutMs = 15_000) => {
   const controller = new AbortController()
   const t = setTimeout(() => controller.abort(), timeoutMs)
@@ -119,17 +131,18 @@ const listEntries = async (root, currentPath) => {
   for (const entry of entries) {
     const entryPath = path.join(target, entry.name)
     const relative = normalized.replace(/^\/+/, '')
-    const entryUrlPath = toUrlPath(path.posix.join('/uploads', relative, entry.name))
     if (entry.isDirectory()) {
       items.push({ type: 'folder', name: entry.name, path: normalizePath(path.posix.join(normalized, entry.name)) })
     } else if (entry.isFile()) {
       const info = await fs.stat(entryPath)
       const type = isImageFileName(entry.name) ? 'image' : 'file'
+      const relPath = normalizePath(path.posix.join(normalized, entry.name))
       items.push({
         type,
         name: entry.name,
-        path: normalizePath(path.posix.join(normalized, entry.name)),
-        url: entryUrlPath,
+        path: relPath,
+        url: buildRawUrl(relPath),
+        thumbUrl: type === 'image' ? buildThumbUrl(relPath) : undefined,
         size: info.size,
         uploadedAt: info.mtime.toISOString()
       })
@@ -209,13 +222,13 @@ const scanRecentLocal = async (root, limit) => {
       if (scannedFiles > maxFiles) break
       try {
         const info = await fs.stat(full)
-        const relDir = String(current.rel).replace(/^\/+/, '')
-        const entryUrlPath = toUrlPath(path.posix.join('/uploads', relDir, entry.name))
+        const relPath = normalizePath(path.posix.join(current.rel, entry.name))
         pushTop(top, {
           type: 'image',
           name: entry.name,
-          path: normalizePath(path.posix.join(current.rel, entry.name)),
-          url: entryUrlPath,
+          path: relPath,
+          url: buildRawUrl(relPath),
+          thumbUrl: buildThumbUrl(relPath),
           size: info.size,
           uploadedAt: info.mtime.toISOString()
         }, limit)
@@ -260,7 +273,9 @@ const scanRecentNode = async (node, rootPath, limit) => {
       if (scannedItems > maxItems) break
       const relPath = toRelativePath(item?.path, rootPath)
       const type = isImageFileName(item?.name) ? 'image' : 'file'
-      pushTop(top, { ...item, type, path: relPath, url: `/api/images/raw?path=${encodeURIComponent(relPath)}` }, limit)
+      const nodePath = joinNodePath(rootPath, relPath)
+      const blobUrl = new URL(`/blob${nodePath}`, base).toString()
+      pushTop(top, { ...item, type, path: relPath, url: buildRawUrl(relPath), thumbUrl: type === 'image' ? buildThumbUrl(relPath) : undefined, blobUrl }, limit)
     }
   }
 
@@ -365,7 +380,9 @@ router.get('/images/list', requireAuth({
             continue
           }
           const kind = isImageFileName(it?.name) ? 'image' : 'file'
-          const next = { ...it, type: kind, path: rel, url: `/api/images/raw?path=${encodeURIComponent(rel)}` }
+          const nodePath = joinNodePath(node?.rootDir || '/', rel)
+          const blobUrl = new URL(`/blob${nodePath}`, base).toString()
+          const next = { ...it, type: kind, path: rel, url: buildRawUrl(rel), thumbUrl: kind === 'image' ? buildThumbUrl(rel) : undefined, blobUrl }
           const prev = merged.get(rel)
           if (!prev) {
             merged.set(rel, next)

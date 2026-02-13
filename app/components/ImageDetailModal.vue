@@ -3,7 +3,7 @@
     <n-drawer-content title="图片详情" closable>
       <div v-if="entry" class="space-y-6">
         <div class="overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50">
-          <img v-if="entry.url" :src="entry.url" :alt="entry.name" class="w-full h-auto object-contain" />
+          <img v-if="entry.url" ref="imageRef" :src="entry.url" :alt="entry.name" class="w-full h-auto object-contain" @load="onImageLoad" />
           <div v-else class="flex aspect-square items-center justify-center text-sm text-zinc-500">无预览</div>
         </div>
 
@@ -23,6 +23,7 @@
               <span class="break-all">{{ entry.name }}</span>
             </n-descriptions-item>
             <n-descriptions-item label="大小">{{ sizeText }}</n-descriptions-item>
+            <n-descriptions-item label="分辨率">{{ resolutionText }}</n-descriptions-item>
             <n-descriptions-item label="上传时间">{{ timeText }}</n-descriptions-item>
           </n-descriptions>
         </div>
@@ -32,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import { 
   NDrawer, NDrawerContent, NInput, NInputGroup, NButton, NIcon, 
   NDescriptions, NDescriptionsItem, useMessage 
@@ -44,6 +45,8 @@ const open = defineModel<boolean>({ required: true })
 const props = defineProps<{ entry: ImageEntry | null }>()
 
 const message = useMessage()
+const imageRef = ref<HTMLImageElement | null>(null)
+const resolutionText = ref('-')
 
 const urlText = computed(() => {
   const url = props.entry?.url
@@ -73,6 +76,23 @@ const timeText = computed(() => {
   if (Number.isNaN(d.getTime())) return t
   return d.toLocaleString()
 })
+
+const onImageLoad = () => {
+  const el = imageRef.value
+  const w = el?.naturalWidth
+  const h = el?.naturalHeight
+  if (Number.isFinite(w) && Number.isFinite(h) && w && h) resolutionText.value = `${w} x ${h}`
+  else resolutionText.value = '-'
+}
+
+watch(
+  () => props.entry?.url,
+  async () => {
+    resolutionText.value = '-'
+    await nextTick()
+    onImageLoad()
+  }
+)
 
 const copyUrl = async () => {
   const url = urlText.value

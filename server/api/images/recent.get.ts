@@ -2,11 +2,22 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { getQuery } from 'h3'
 import { rootDir } from '../../config.js'
-import { isImageFileName, normalizePath, toUrlPath } from '../../utils/paths.js'
+import { isImageFileName, normalizePath } from '../../utils/paths.js'
 import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, listEnabledPicmiNodes, normalizeHttpBase, ok, requireAuth, toRelativePath, usePicmi } from '../../utils/nitro'
 
 let cache: { key: string; limit: number; ts: number; data: any } | null = null
 const cacheTtlMs = 10_000
+
+const encodePathForRaw = (relPath: string) => {
+  return String(relPath)
+    .replace(/^\/+/, '')
+    .split('/')
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join('/')
+}
+const buildRawUrl = (relPath: string) => `/raw/${encodePathForRaw(relPath)}`
+const buildThumbUrl = (relPath: string) => `/thumb/${encodePathForRaw(relPath)}`
 
 const pushTop = (arr: any[], item: any, limit: number) => {
   arr.push(item)
@@ -44,13 +55,14 @@ const scanLocalRecent = async (root: string, limit: number) => {
       try {
         const info = await fs.stat(full)
         const relDir = current.rel.replace(/^\/+/, '')
-        const entryUrlPath = toUrlPath(path.posix.join('/uploads', relDir, entry.name))
         const type = isImageFileName(entry.name) ? 'image' : 'file'
+        const relPath = normalizePath(path.posix.join(current.rel, entry.name))
         pushTop(top, {
           type,
           name: entry.name,
-          path: normalizePath(path.posix.join(current.rel, entry.name)),
-          url: entryUrlPath,
+          path: relPath,
+          url: buildRawUrl(relPath),
+          thumbUrl: type === 'image' ? buildThumbUrl(relPath) : undefined,
           size: info.size,
           uploadedAt: info.mtime.toISOString()
         }, limit)
@@ -95,11 +107,15 @@ const scanNodeRecent = async (node: any, rootPath: string, limit: number) => {
       if (scannedItems > maxItems) break
       const relPath = toRelativePath(item?.path, rootPath)
       const type = isImageFileName(item?.name) ? 'image' : 'file'
+      const nodePath = joinNodePath(rootPath, relPath)
+      const blobUrl = new URL(`/blob${nodePath}`, base).toString()
       pushTop(top, {
         ...item,
         type,
         path: relPath,
-        url: `/api/images/raw?path=${encodeURIComponent(relPath)}`
+        url: buildRawUrl(relPath),
+        thumbUrl: type === 'image' ? buildThumbUrl(relPath) : undefined,
+        blobUrl
       }, limit)
     }
   }

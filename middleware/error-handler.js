@@ -5,6 +5,7 @@ const errorHandler = (logger) => {
     const code = err?.code ?? 1
     const message = err?.message || '服务异常'
     logger.error({ err })
+    res.setHeader('content-type', 'application/json; charset=utf-8')
     res.status(status).json({ code, message, data: null })
   }
 }

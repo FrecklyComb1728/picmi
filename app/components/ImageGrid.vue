@@ -31,12 +31,13 @@
 
       <div v-if="entry.type === 'image'" class="relative aspect-video w-full bg-zinc-50">
         <img
-          v-if="entry.url"
-          :src="entry.url"
+          v-if="entry.thumbUrl || entry.url"
+          :src="entry.thumbUrl || entry.url"
           :alt="entry.name"
           class="absolute inset-0 h-full w-full object-cover transition-opacity duration-300 group-hover:opacity-90"
           loading="lazy"
           @dblclick.stop="onDblClick(entry)"
+          @contextmenu.stop.prevent="(e) => onContextMenu(e, entry)"
         />
       </div>
     </div>
@@ -63,6 +64,7 @@ const emit = defineEmits<{
   toggle: [entry: ImageEntry, checked: boolean]
   action: [action: string, entry: ImageEntry]
   dblclick: [entry: ImageEntry]
+  contextmenu: [entry: ImageEntry, x: number, y: number]
 }>()
 
 const renderIcon = (icon: any) => {
@@ -92,6 +94,10 @@ const onOpen = (entry: ImageEntry) => {
 
 const onDblClick = (entry: ImageEntry) => {
   emit('dblclick', entry)
+}
+
+const onContextMenu = (e: MouseEvent, entry: ImageEntry) => {
+  emit('contextmenu', entry, e.clientX, e.clientY)
 }
 
 const onToggle = (entry: ImageEntry, checked: boolean) => {

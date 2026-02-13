@@ -5,6 +5,8 @@ export type ImageEntry = {
   name: string
   path: string
   url?: string
+  thumbUrl?: string
+  blobUrl?: string
   size?: number
   uploadedAt?: string
 }

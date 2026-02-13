@@ -14,6 +14,21 @@
            <template #unchecked>已禁用</template>
          </n-switch>
       </n-form-item>
+
+      <n-form-item label="文件访问需要登录">
+        <n-switch v-model:value="mediaRequireAuth">
+          <template #checked>需要登录</template>
+          <template #unchecked>无需登录</template>
+        </n-switch>
+      </n-form-item>
+
+      <n-form-item label="缩略图处理位置">
+        <n-select v-model:value="thumbnailProcessing" :options="thumbnailProcessingOptions" class="w-full" :disabled="thumbnailProcessingLocked" />
+      </n-form-item>
+
+      <n-form-item label="小图跳过缩略图阈值(MB)">
+        <n-input-number v-model:value="thumbnailSkipBelowMb" :min="0" :step="0.5" class="w-full" />
+      </n-form-item>
       
       <div class="flex justify-end">
         <n-button type="primary" :loading="saving" :disabled="!!listApiError || !!storageConflictError || !!maxUploadError" @click="saveConfig">保存配置</n-button>
@@ -240,9 +255,21 @@ const typeIconMap = new Map<string, any>(typeOptions.map((it) => [String(it.valu
 
 const listApi = ref('/api/images/list')
 const enableLocalStorage = ref(false)
+const mediaRequireAuth = ref(true)
 const maxUploadMb = ref(20)
+const thumbnailProcessing = ref<'node' | 'backend'>('node')
+const thumbnailSkipBelowMb = ref<number>(0)
 const nodes = ref<NodeConfig[]>([])
 const saving = ref(false)
+
+const thumbnailProcessingOptions = [
+  { label: '存储节点处理', value: 'node' },
+  { label: '主节点处理', value: 'backend' }
+]
+
+const thumbnailProcessingLocked = computed(() => {
+  return nodes.value.some((n) => n && n.enabled !== false && n.type !== 'picmi-node')
+})
 
 const nodeStatusById = ref<Record<string, any>>({})
 const statusTimer = ref<number | null>(null)
@@ -261,11 +288,23 @@ const maxUploadError = computed(() => {
 
 const load = async () => {
   try {
-    const res = await apiFetch<{ listApi?: string; nodes?: NodeConfig[]; enableLocalStorage?: boolean; maxUploadBytes?: number }>('/config', { method: 'GET' })
+    const res = await apiFetch<{
+      listApi?: string
+      nodes?: NodeConfig[]
+      enableLocalStorage?: boolean
+      mediaRequireAuth?: boolean
+      maxUploadBytes?: number
+      thumbnailProcessing?: 'node' | 'backend'
+      thumbnailSkipBelowBytes?: number
+    }>('/config', { method: 'GET' })
     listApi.value = res.listApi ?? '/api/images/list'
     enableLocalStorage.value = res.enableLocalStorage ?? false
+    mediaRequireAuth.value = res.mediaRequireAuth !== false
+    thumbnailProcessing.value = res.thumbnailProcessing === 'backend' ? 'backend' : 'node'
     const bytes = Number(res.maxUploadBytes)
     maxUploadMb.value = Number.isFinite(bytes) && bytes > 0 ? Math.max(1, Math.floor(bytes / (1024 * 1024))) : 20
+    const skipBytes = Number(res.thumbnailSkipBelowBytes)
+    thumbnailSkipBelowMb.value = Number.isFinite(skipBytes) && skipBytes > 0 ? Math.round((skipBytes / (1024 * 1024)) * 10) / 10 : 0
     const raw = res.nodes ?? []
     const allowed = new Set(typeOptions.map((it) => String(it.value)))
     nodes.value = raw.map((node) => ({
@@ -371,7 +410,10 @@ const saveConfig = async () => {
         listApi: listApi.value,
         nodes: nodes.value,
         enableLocalStorage: enableLocalStorage.value,
-        maxUploadBytes: Math.floor(Number(maxUploadMb.value) * 1024 * 1024)
+        mediaRequireAuth: mediaRequireAuth.value,
+        maxUploadBytes: Math.floor(Number(maxUploadMb.value) * 1024 * 1024),
+        thumbnailProcessing: thumbnailProcessing.value,
+        thumbnailSkipBelowBytes: Math.floor(Math.max(0, Number(thumbnailSkipBelowMb.value) || 0) * 1024 * 1024)
       }
     })
     message.success('已保存')
@@ -379,6 +421,7 @@ const saveConfig = async () => {
     const apiMessage = error?.data?.message || error?.response?._data?.message
     const code = error?.data?.code || error?.response?._data?.code
     if (code === 40003) message.error('本地存储与存储节点不可同时启用')
+    else if (code === 40004) message.error('存在非PicMi-Node节点时不可更改缩略图处理位置')
     else message.error(apiMessage || '保存失败')
   } finally {
     saving.value = false

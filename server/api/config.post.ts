@@ -9,15 +9,27 @@ export default defineEventHandler(async (event) => {
   try {
     const picmi = await usePicmi(event)
 
-    const body = await readBodySafe<{ listApi?: string; nodes?: unknown; enableLocalStorage?: boolean; maxUploadBytes?: unknown }>(event)
+    const body = await readBodySafe<{
+      listApi?: string
+      nodes?: unknown
+      enableLocalStorage?: boolean
+      mediaRequireAuth?: unknown
+      maxUploadBytes?: unknown
+      thumbnailProcessing?: unknown
+      thumbnailMaxBytes?: unknown
+      thumbnailMaxWidth?: unknown
+      thumbnailSkipBelowBytes?: unknown
+    }>(event)
     const listApi = body?.listApi
     const nodes = body?.nodes
     const enableLocalStorage = body?.enableLocalStorage ?? false
+    const mediaRequireAuthRaw = body?.mediaRequireAuth
     const maxUploadBytesRaw = body?.maxUploadBytes
     if (!listApi || !Array.isArray(nodes)) return fail(event, 400, 40001, '参数错误')
     const listApiStr = String(listApi).trim()
     if (!listApiStr.startsWith('/api/')) return fail(event, 400, 40001, '参数错误')
     if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(listApiStr)) return fail(event, 400, 40001, '参数错误')
+    if (mediaRequireAuthRaw !== undefined && typeof mediaRequireAuthRaw !== 'boolean') return fail(event, 400, 40001, '参数错误')
     if (maxUploadBytesRaw !== undefined) {
       const n = Number(maxUploadBytesRaw)
       if (!Number.isFinite(n)) return fail(event, 400, 40001, '参数错误')
@@ -28,7 +40,31 @@ export default defineEventHandler(async (event) => {
     const prev = await picmi.store.getConfig()
     const prevNodes = Array.isArray(prev?.nodes) ? prev.nodes : []
     await syncNewNodes(prevNodes, nodes as any[])
-    await picmi.store.saveConfig(listApiStr, nodes, enableLocalStorage, maxUploadBytesRaw)
+    const mediaRequireAuth = mediaRequireAuthRaw !== undefined ? mediaRequireAuthRaw === true : prev?.mediaRequireAuth !== false
+    const thumbnailProcessingRaw = body?.thumbnailProcessing
+    const thumbnailMaxBytesRaw = body?.thumbnailMaxBytes
+    const thumbnailMaxWidthRaw = body?.thumbnailMaxWidth
+    const thumbnailSkipBelowBytesRaw = body?.thumbnailSkipBelowBytes
+    if (thumbnailMaxBytesRaw !== undefined) {
+      const n = Number(thumbnailMaxBytesRaw)
+      if (!Number.isFinite(n)) return fail(event, 400, 40001, '参数错误')
+    }
+    if (thumbnailMaxWidthRaw !== undefined) {
+      const n = Number(thumbnailMaxWidthRaw)
+      if (!Number.isFinite(n)) return fail(event, 400, 40001, '参数错误')
+    }
+    if (thumbnailSkipBelowBytesRaw !== undefined) {
+      const n = Number(thumbnailSkipBelowBytesRaw)
+      if (!Number.isFinite(n)) return fail(event, 400, 40001, '参数错误')
+    }
+    const modeStr = String(thumbnailProcessingRaw ?? prev?.thumbnailProcessing ?? 'node').trim()
+    const thumbnailProcessing = modeStr === 'backend' ? 'backend' : 'node'
+    const thumbnailMaxBytes = thumbnailMaxBytesRaw ?? prev?.thumbnailMaxBytes
+    const thumbnailMaxWidth = thumbnailMaxWidthRaw ?? prev?.thumbnailMaxWidth
+    const thumbnailSkipBelowBytes = thumbnailSkipBelowBytesRaw ?? prev?.thumbnailSkipBelowBytes
+    const hasNonPicmiNode = (nodes as any[]).some((node) => node && node.enabled !== false && String(node?.type ?? 'picmi-node') !== 'picmi-node')
+    if (thumbnailProcessing === 'backend' && hasNonPicmiNode) return fail(event, 400, 40004, '存在非PicMi-Node节点时不可更改缩略图处理位置')
+    await picmi.store.saveConfig(listApiStr, nodes, enableLocalStorage, mediaRequireAuth, maxUploadBytesRaw, thumbnailProcessing, thumbnailMaxBytes, thumbnailMaxWidth, thumbnailSkipBelowBytes)
     return ok(null)
   } catch {
     return fail(event, 500, 1, '服务异常')

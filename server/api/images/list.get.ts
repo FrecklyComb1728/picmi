@@ -11,6 +11,17 @@ export default defineEventHandler(async (event) => {
     const query = getQuery(event) as { path?: string }
     const currentPath = normalizePath(query?.path ?? '/')
 
+    const encodePathForRaw = (relPath: string) => {
+      return String(relPath)
+        .replace(/^\/+/, '')
+        .split('/')
+        .filter(Boolean)
+        .map(encodeURIComponent)
+        .join('/')
+    }
+    const buildRawUrl = (relPath: string) => `/raw/${encodePathForRaw(relPath)}`
+    const buildThumbUrl = (relPath: string) => `/thumb/${encodePathForRaw(relPath)}`
+
     const auth = await requireAuth(event, async () => {
       const list = await picmi.store.getPublicPaths()
       return list.includes(currentPath)
@@ -56,7 +67,9 @@ export default defineEventHandler(async (event) => {
             continue
           }
           const kind = isImageFileName(it?.name) ? 'image' : 'file'
-          const next = { ...it, type: kind, path: rel, url: `/api/images/raw?path=${encodeURIComponent(rel)}` }
+          const nodePath = joinNodePath(node?.rootDir || '/', rel)
+          const blobUrl = new URL(`/blob${nodePath}`, base).toString()
+          const next = { ...it, type: kind, path: rel, url: buildRawUrl(rel), thumbUrl: kind === 'image' ? buildThumbUrl(rel) : undefined, blobUrl }
           const prev = merged.get(rel)
           if (!prev) {
             merged.set(rel, next)
@@ -75,7 +88,14 @@ export default defineEventHandler(async (event) => {
 
     const root = path.resolve(rootDir, picmi.config.storageRoot)
     const data = await listEntries(root, currentPath)
-    return ok(data)
+    const items = Array.isArray((data as any)?.items)
+      ? (data as any).items.map((it: any) =>
+          it?.type === 'folder'
+            ? it
+            : { ...it, url: buildRawUrl(it?.path), thumbUrl: it?.type === 'image' ? buildThumbUrl(it?.path) : undefined }
+        )
+      : []
+    return ok({ ...(data as any), items })
   } catch {
     return fail(event, 500, 1, '服务异常')
   }

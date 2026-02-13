@@ -79,7 +79,7 @@
     </div>
     
     <div v-else-if="error" class="p-4 text-red-500 bg-red-50 rounded-xl border border-red-100">
-      加载失败：{{ error.message }}
+      加载失败：{{ errorText }}
     </div>
     
     <div v-else class="space-y-6 pb-12">
@@ -112,6 +112,7 @@
             @toggle="toggleEntry"
             @action="handleGridAction"
             @dblclick="handlePreview"
+            @contextmenu="handleThumbContextMenu"
           />
           <div class="mt-6 flex justify-center">
             <n-pagination v-if="sortedImages.length > pageSize" v-model:page="page" :page-size="pageSize" :item-count="sortedImages.length" />
@@ -139,6 +140,15 @@
     <ImageDetailModal v-model="detailOpen" :entry="activeEntry" />
     <ImageUploadModal v-model="open" :current-path="currentPath" :incoming-files="incomingFiles" @uploaded="refresh" />
     <GlobalPasteUpload :current-path="currentPath" @uploaded="refresh" @paste="handlePaste" />
+    <n-dropdown
+      trigger="manual"
+      :show="thumbMenu.show"
+      :x="thumbMenu.x"
+      :y="thumbMenu.y"
+      :options="thumbMenuOptions"
+      @select="handleThumbMenuSelect"
+      @update:show="(v) => thumbMenu.show = v"
+    />
 
     <n-modal
        v-model:show="renameOpen"
@@ -234,13 +244,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, reactive } from 'vue'
+import { ref, computed, watch, reactive, h } from 'vue'
 import { 
   NBreadcrumb, NBreadcrumbItem, NIcon, NInput, NInputGroup, NButton, NButtonGroup, 
-  NPopselect, NSkeleton, NEmpty, NPagination, NModal, NSelect, useMessage, useDialog 
+  NPopselect, NSkeleton, NEmpty, NPagination, NModal, NSelect, NDropdown, useMessage, useDialog 
 } from 'naive-ui'
-import { 
-  ImagesOutline, SearchOutline, FilterOutline, CloudUploadOutline, FolderOpenOutline, CloseOutline, ShareSocialOutline
+import {
+  ImagesOutline, SearchOutline, FilterOutline, CloudUploadOutline, FolderOpenOutline, CloseOutline, ShareSocialOutline, CopyOutline, OpenOutline, InformationCircleOutline
 } from '@vicons/ionicons5'
 import type { ClipboardItem } from '~/composables/useImageClipboard'
 import type { ImageEntry, ImagesListResponse } from '~/types/images'
@@ -268,8 +278,10 @@ const open = computed({
 })
 
 const handlePreview = (entry: ImageEntry) => {
-  if (entry.type !== 'image' || !entry.url) return
-  previewUrl.value = entry.url
+  if (entry.type !== 'image') return
+  const url = entry.thumbUrl || entry.url
+  if (!url) return
+  previewUrl.value = url
   previewVisible.value = true
 }
 
@@ -327,6 +339,20 @@ const { data, pending, error, refresh } = await useFetch<ImagesListResponse>(lis
   transform: (value) => unwrap<ImagesListResponse>(value)
 })
 
+const errorText = computed(() => {
+  const e: any = error.value
+  if (!e) return ''
+  const data = e?.data ?? e?.response?._data
+  if (data && typeof data === 'object' && 'message' in data) return String((data as any).message || '')
+  if (typeof data === 'string') return data
+  if (typeof TextDecoder !== 'undefined') {
+    if (data instanceof ArrayBuffer) return new TextDecoder('utf-8').decode(new Uint8Array(data))
+    if (data instanceof Uint8Array) return new TextDecoder('utf-8').decode(data)
+  }
+  const message = e?.message
+  return typeof message === 'string' && message ? message : '加载失败'
+})
+
 const rawItems = computed<ImageEntry[]>(() => data.value?.items ?? [])
 const publicEnabled = ref(false)
 
@@ -353,7 +379,9 @@ const sortOptions = [
   { label: '名称 A-Z', value: 'name-asc' },
   { label: '名称 Z-A', value: 'name-desc' },
   { label: '时间新->旧', value: 'time-desc' },
-  { label: '时间旧->新', value: 'time-asc' }
+  { label: '时间旧->新', value: 'time-asc' },
+  { label: '文件大->小', value: 'size-desc' },
+  { label: '文件小->大', value: 'size-asc' }
 ]
 const sort = ref<string>('default')
 const pageSize = ref(40)
@@ -387,12 +415,24 @@ const byTimeAsc = (a: ImageEntry, b: ImageEntry) => {
   const tb = b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0
   return ta - tb
 }
+const bySizeDesc = (a: ImageEntry, b: ImageEntry) => {
+  const sa = Number.isFinite(a.size) ? Number(a.size) : 0
+  const sb = Number.isFinite(b.size) ? Number(b.size) : 0
+  return sb - sa
+}
+const bySizeAsc = (a: ImageEntry, b: ImageEntry) => {
+  const sa = Number.isFinite(a.size) ? Number(a.size) : 0
+  const sb = Number.isFinite(b.size) ? Number(b.size) : 0
+  return sa - sb
+}
 
 const sortFn = computed(() => {
   if (sort.value === 'name-asc') return byNameAsc
   if (sort.value === 'name-desc') return byNameDesc
   if (sort.value === 'time-desc') return byTimeDesc
   if (sort.value === 'time-asc') return byTimeAsc
+  if (sort.value === 'size-desc') return bySizeDesc
+  if (sort.value === 'size-asc') return bySizeAsc
   return null
 })
 
@@ -419,6 +459,119 @@ watch([sortedImages, pageSize], () => {
 const detailOpen = ref(false)
 const activeEntry = ref<ImageEntry | null>(null)
 
+const encodePathForRaw = (relPath: string) => {
+  return String(relPath)
+    .replace(/^\/+/, '')
+    .split('/')
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join('/')
+}
+
+const thumbMenu = reactive<{ show: boolean; x: number; y: number; entry: ImageEntry | null }>({
+  show: false,
+  x: 0,
+  y: 0,
+  entry: null
+})
+
+const closeThumbMenu = () => {
+  thumbMenu.show = false
+}
+
+watch(() => thumbMenu.show, (open) => {
+  if (!import.meta.client) return
+  if (!open) return
+
+  const onPointerDown = (e: PointerEvent) => {
+    const path = typeof (e as any).composedPath === 'function' ? (e as any).composedPath() : []
+    const inMenu = path.some((el: any) => el?.classList?.contains('n-dropdown-menu') || el?.classList?.contains('n-dropdown-option') || el?.classList?.contains('n-dropdown'))
+    if (!inMenu && (e.button === 0 || e.button === 1 || e.button === 2)) closeThumbMenu()
+  }
+  const onWheel = () => closeThumbMenu()
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') closeThumbMenu()
+  }
+
+  window.addEventListener('pointerdown', onPointerDown, { capture: true })
+  window.addEventListener('wheel', onWheel, { capture: true, passive: true })
+  window.addEventListener('keydown', onKeyDown, { capture: true })
+
+  return () => {
+    window.removeEventListener('pointerdown', onPointerDown, { capture: true } as any)
+    window.removeEventListener('wheel', onWheel, { capture: true } as any)
+    window.removeEventListener('keydown', onKeyDown, { capture: true } as any)
+  }
+})
+
+const renderIcon = (icon: any) => {
+  return () => h(NIcon, null, { default: () => h(icon) })
+}
+
+const toAbsUrl = (url: string) => {
+  if (/^https?:\/\//.test(url)) return url
+  if (import.meta.client) return new URL(url, window.location.origin).toString()
+  return url
+}
+
+const getEntryRawUrl = (entry: ImageEntry) => entry.url || `/raw/${encodePathForRaw(entry.path)}`
+const getEntryThumbUrl = (entry: ImageEntry) => entry.thumbUrl || `/thumb/${encodePathForRaw(entry.path)}`
+
+const thumbMenuOptions = computed(() => {
+  return [
+    { label: '属性', key: 'properties', icon: renderIcon(InformationCircleOutline) },
+    { label: '复制原图直链', key: 'copy-raw', icon: renderIcon(CopyOutline) },
+    { label: '复制缩略图直链', key: 'copy-thumb', icon: renderIcon(CopyOutline) },
+    { label: '新标签打开原图', key: 'open-raw', icon: renderIcon(OpenOutline) },
+    { label: '新标签打开缩略图', key: 'open-thumb', icon: renderIcon(OpenOutline) }
+  ]
+})
+
+const handleThumbContextMenu = (entry: ImageEntry, x: number, y: number) => {
+  if (entry.type !== 'image') return
+  thumbMenu.entry = entry
+  thumbMenu.x = x
+  thumbMenu.y = y
+  thumbMenu.show = true
+}
+
+const handleThumbMenuSelect = async (key: string) => {
+  const entry = thumbMenu.entry
+  closeThumbMenu()
+  if (!entry) return
+  const rawUrl = toAbsUrl(getEntryRawUrl(entry))
+  const thumbUrl = toAbsUrl(getEntryThumbUrl(entry))
+
+  switch (key) {
+    case 'properties':
+      activeEntry.value = entry
+      detailOpen.value = true
+      break
+    case 'copy-raw':
+      try {
+        await navigator.clipboard.writeText(rawUrl)
+        message.success('已复制原图直链')
+      } catch {
+        message.error('复制失败')
+      }
+      break
+    case 'copy-thumb':
+      try {
+        await navigator.clipboard.writeText(thumbUrl)
+        message.success('已复制缩略图直链')
+      } catch {
+        message.error('复制失败')
+      }
+      break
+    case 'open-raw':
+      if (import.meta.client) window.open(rawUrl, '_blank', 'noopener,noreferrer')
+      break
+    case 'open-thumb':
+      if (import.meta.client) window.open(thumbUrl, '_blank', 'noopener,noreferrer')
+      break
+  }
+}
+
 const openEntry = async (entry: ImageEntry) => {
   if (entry.type === 'folder') {
     const encoded = entry.path
@@ -431,7 +584,7 @@ const openEntry = async (entry: ImageEntry) => {
     return
   }
   if (entry.type === 'file') {
-    const rawUrl = `/api/images/raw?path=${encodeURIComponent(entry.path)}`
+    const rawUrl = entry.url || `/raw/${encodePathForRaw(entry.path)}`
     if (import.meta.client) window.open(rawUrl, '_blank', 'noopener,noreferrer')
     return
   }

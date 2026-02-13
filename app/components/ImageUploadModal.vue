@@ -29,6 +29,10 @@
         </n-form-item>
       </div>
 
+      <n-form-item label="缩略图处理位置" :show-feedback="false">
+        <n-select v-model:value="thumbnailProcessing" :options="thumbnailProcessingOptions" />
+      </n-form-item>
+
       <n-upload
         multiple
         directory-dnd
@@ -122,6 +126,7 @@ const { apiFetch } = useApi()
 const message = useMessage()
 
 type UploadMode = 'backend' | 'frontend'
+type ThumbnailProcessing = 'follow' | 'backend' | 'node'
 type FileItem = {
   id: string
   file: File
@@ -134,6 +139,12 @@ const modeOptions = [
 ]
 
 const mode = ref<UploadMode>('backend')
+const thumbnailProcessingOptions = [
+  { label: '跟随系统设置', value: 'follow' },
+  { label: '存储节点处理缩略图', value: 'node' },
+  { label: '后端压缩后上传', value: 'backend' }
+]
+const thumbnailProcessing = ref<ThumbnailProcessing>('follow')
 const targetPath = ref(props.currentPath)
 watch(
   () => props.currentPath,
@@ -268,6 +279,7 @@ const uploadOneBackend = async (item: FileItem, override: boolean) => {
   fd.append('file', item.file, item.name)
   fd.append('path', targetPath.value)
   fd.append('override', override ? '1' : '0')
+  if (thumbnailProcessing.value !== 'follow') fd.append('thumbnailProcessing', thumbnailProcessing.value)
 
   await $fetch(config.public.uploadPath, {
     method: 'POST',
@@ -289,7 +301,8 @@ const uploadOneFrontend = async (item: FileItem) => {
     body: {
       path: targetPath.value,
       filename: item.name,
-      base64
+      base64,
+      thumbnailProcessing: thumbnailProcessing.value === 'follow' ? undefined : thumbnailProcessing.value
     }
   })
 }

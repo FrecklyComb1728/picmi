@@ -18,13 +18,26 @@ router.get('/config', requireAdmin(), async (req, res, next) => {
 
 router.post('/config', requireAdmin(), async (req, res, next) => {
   try {
-    const { listApi, nodes, enableLocalStorage, maxUploadBytes } = req.body ?? {}
+    const { listApi, nodes, enableLocalStorage, mediaRequireAuth, maxUploadBytes, thumbnailProcessing, thumbnailMaxBytes, thumbnailMaxWidth, thumbnailSkipBelowBytes } = req.body ?? {}
     if (!listApi || !Array.isArray(nodes)) return expressFail(res, 400, 40001, '参数错误')
     const listApiStr = String(listApi).trim()
     if (!listApiStr.startsWith('/api/')) return expressFail(res, 400, 40001, '参数错误')
     if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(listApiStr)) return expressFail(res, 400, 40001, '参数错误')
+    if (mediaRequireAuth !== undefined && typeof mediaRequireAuth !== 'boolean') return expressFail(res, 400, 40001, '参数错误')
     if (maxUploadBytes !== undefined) {
       const n = Number(maxUploadBytes)
+      if (!Number.isFinite(n)) return expressFail(res, 400, 40001, '参数错误')
+    }
+    if (thumbnailMaxBytes !== undefined) {
+      const n = Number(thumbnailMaxBytes)
+      if (!Number.isFinite(n)) return expressFail(res, 400, 40001, '参数错误')
+    }
+    if (thumbnailMaxWidth !== undefined) {
+      const n = Number(thumbnailMaxWidth)
+      if (!Number.isFinite(n)) return expressFail(res, 400, 40001, '参数错误')
+    }
+    if (thumbnailSkipBelowBytes !== undefined) {
+      const n = Number(thumbnailSkipBelowBytes)
       if (!Number.isFinite(n)) return expressFail(res, 400, 40001, '参数错误')
     }
     const hasEnabledNode = nodes.some((node) => node && node.enabled !== false)
@@ -35,7 +48,17 @@ router.post('/config', requireAdmin(), async (req, res, next) => {
     const prev = await store.getConfig()
     const prevNodes = Array.isArray(prev?.nodes) ? prev.nodes : []
     await syncNewNodes(prevNodes, nodes)
-    await store.saveConfig(listApiStr, nodes, enableLocalStorage === true, maxUploadBytes)
+    const modeStr = String(thumbnailProcessing ?? prev?.thumbnailProcessing ?? 'node').trim()
+    const nextMode = modeStr === 'backend' ? 'backend' : 'node'
+    const nextMaxBytes = thumbnailMaxBytes !== undefined ? thumbnailMaxBytes : prev?.thumbnailMaxBytes
+    const nextMaxWidth = thumbnailMaxWidth !== undefined ? thumbnailMaxWidth : prev?.thumbnailMaxWidth
+    const nextMediaRequireAuth = mediaRequireAuth !== undefined ? mediaRequireAuth === true : prev?.mediaRequireAuth !== false
+    const nextSkipBelow = thumbnailSkipBelowBytes !== undefined ? thumbnailSkipBelowBytes : prev?.thumbnailSkipBelowBytes
+    const hasNonPicmiNode = nodes.some((node) => node && node.enabled !== false && String(node?.type ?? 'picmi-node') !== 'picmi-node')
+    if (nextMode === 'backend' && hasNonPicmiNode) {
+      return expressFail(res, 400, 40004, '存在非PicMi-Node节点时不可更改缩略图处理位置')
+    }
+    await store.saveConfig(listApiStr, nodes, enableLocalStorage === true, nextMediaRequireAuth, maxUploadBytes, nextMode, nextMaxBytes, nextMaxWidth, nextSkipBelow)
     return expressOk(res, null)
   } catch (error) {
     next(error)

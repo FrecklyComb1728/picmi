@@ -45,18 +45,30 @@
       </div>
 
       <div class="border-t border-zinc-100 p-4">
-        <n-dropdown trigger="click" :options="userOptions" @select="handleUserSelect">
-          <div class="flex items-center gap-3 cursor-pointer p-2 hover:bg-zinc-50 rounded-lg transition-colors" :class="{ 'justify-center': collapsed }">
-            <n-avatar round size="small" class="bg-primary text-white">
-              {{ username.charAt(0).toUpperCase() }}
-            </n-avatar>
-            <div v-if="!collapsed" class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-zinc-900 truncate">{{ username }}</p>
-              <p class="text-xs text-zinc-500 truncate">管理员</p>
-            </div>
-            <n-icon v-if="!collapsed" :component="ChevronDown" class="text-zinc-400" />
+        <div v-if="!collapsed" class="flex items-center gap-3 p-2 rounded-lg hover:bg-zinc-50 transition-colors group">
+          <n-avatar round size="small" class="bg-primary text-white shrink-0">
+            {{ (username || 'A').charAt(0).toUpperCase() }}
+          </n-avatar>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-zinc-900 truncate">{{ username || 'Admin' }}</p>
+            <p class="text-xs text-zinc-500 truncate">管理员</p>
           </div>
-        </n-dropdown>
+          <n-button text class="text-zinc-400 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100" @click="handleLogout" title="退出登录">
+            <template #icon>
+              <n-icon :component="LogOutOutline" size="18" />
+            </template>
+          </n-button>
+        </div>
+        <div v-else class="flex justify-center">
+           <n-tooltip trigger="hover" placement="right">
+             <template #trigger>
+               <n-button text class="text-zinc-500 hover:text-red-600" @click="handleLogout">
+                 <template #icon><n-icon :component="LogOutOutline" size="24" /></template>
+               </n-button>
+             </template>
+             退出登录
+           </n-tooltip>
+        </div>
       </div>
     </div>
   </n-layout-sider>
@@ -65,15 +77,14 @@
 <script setup lang="ts">
 import { ref, computed, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NLayoutSider, NMenu, NDropdown, NAvatar, NIcon, NInput, NButton } from 'naive-ui'
+import { NLayoutSider, NMenu, NAvatar, NIcon, NInput, NButton, NTooltip } from 'naive-ui'
 import { 
   HomeOutline, 
   ImagesOutline, 
   SettingsOutline, 
-  PeopleOutline, 
+  PersonOutline, 
   SearchOutline, 
-  LogOutOutline, 
-  ChevronDown 
+  LogOutOutline
 } from '@vicons/ionicons5'
 import logoUrl from '~/assets/svg/logo.svg?url'
 
@@ -81,10 +92,10 @@ const { open: openCommandPalette } = useCommandPalette()
 
 const route = useRoute()
 const router = useRouter()
-const { logout } = useAuth()
+const { logout, state: authState } = useAuth()
 
 const collapsed = ref(false)
-const username = ref('Admin')
+const username = computed(() => authState.value.username || 'Admin')
 
 const activeKey = computed(() => {
   const path = route.path
@@ -116,17 +127,9 @@ const menuOptions = [
     icon: renderIcon(SettingsOutline)
   },
   {
-    label: '用户管理',
+    label: '个人资料',
     key: 'users',
-    icon: renderIcon(PeopleOutline)
-  }
-]
-
-const userOptions = [
-  {
-    label: '退出登录',
-    key: 'logout',
-    icon: renderIcon(LogOutOutline)
+    icon: renderIcon(PersonOutline)
   }
 ]
 
@@ -134,10 +137,8 @@ const handleUpdateValue = (key: string) => {
   router.push(`/${key}`)
 }
 
-const handleUserSelect = async (key: string) => {
-  if (key === 'logout') {
-    await logout()
-    router.push('/login')
-  }
+const handleLogout = async () => {
+  await logout()
+  router.push('/login')
 }
 </script>

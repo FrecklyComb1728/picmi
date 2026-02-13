@@ -222,25 +222,63 @@ const createSqlStore = (db, dialect) => {
   const getConfig = async () => {
     const listApi = (await getSetting('listApi')) ?? '/api/images/list'
     const enableLocalStorage = (await getSetting('enableLocalStorage')) === '1'
+    const mediaRequireAuth = (await getSetting('mediaRequireAuth')) !== '0'
     const maxUploadBytesRaw = await getSetting('maxUploadBytes')
     const maxUploadBytesDefault = 20 * 1024 * 1024
     const parsed = Number(maxUploadBytesRaw)
     const maxUploadBytes = Number.isFinite(parsed)
       ? Math.max(1 * 1024 * 1024, Math.floor(parsed))
       : maxUploadBytesDefault
+    const thumbnailProcessingRaw = String((await getSetting('thumbnailProcessing')) ?? '').trim()
+    const thumbnailProcessing = thumbnailProcessingRaw === 'backend' ? 'backend' : 'node'
+    const thumbnailMaxBytesRaw = await getSetting('thumbnailMaxBytes')
+    const thumbBytesParsed = Number(thumbnailMaxBytesRaw)
+    const thumbnailMaxBytesDefault = 1 * 1024 * 1024
+    const thumbnailMaxBytes = Number.isFinite(thumbBytesParsed)
+      ? Math.max(64 * 1024, Math.min(10 * 1024 * 1024, Math.floor(thumbBytesParsed)))
+      : thumbnailMaxBytesDefault
+    const thumbnailMaxWidthRaw = await getSetting('thumbnailMaxWidth')
+    const thumbWidthParsed = Number(thumbnailMaxWidthRaw)
+    const thumbnailMaxWidthDefault = 1600
+    const thumbnailMaxWidth = Number.isFinite(thumbWidthParsed)
+      ? Math.max(1024, Math.min(2048, Math.floor(thumbWidthParsed)))
+      : thumbnailMaxWidthDefault
+    const thumbnailSkipBelowBytesRaw = await getSetting('thumbnailSkipBelowBytes')
+    const skipBelowParsed = Number(thumbnailSkipBelowBytesRaw)
+    const thumbnailSkipBelowBytes = Number.isFinite(skipBelowParsed)
+      ? Math.max(0, Math.min(50 * 1024 * 1024, Math.floor(skipBelowParsed)))
+      : 0
     const nodes = await getNodes()
-    return { listApi, nodes, enableLocalStorage, maxUploadBytes }
+    return { listApi, nodes, enableLocalStorage, mediaRequireAuth, maxUploadBytes, thumbnailProcessing, thumbnailMaxBytes, thumbnailMaxWidth, thumbnailSkipBelowBytes }
   }
 
-  const saveConfig = async (listApi, nodes, enableLocalStorage, maxUploadBytes) => {
+  const saveConfig = async (listApi, nodes, enableLocalStorage, mediaRequireAuth, maxUploadBytes, thumbnailProcessing, thumbnailMaxBytes, thumbnailMaxWidth, thumbnailSkipBelowBytes) => {
     await setSetting('listApi', listApi)
     await setSetting('enableLocalStorage', enableLocalStorage ? '1' : '0')
+    await setSetting('mediaRequireAuth', mediaRequireAuth === false ? '0' : '1')
     const maxUploadBytesDefault = 20 * 1024 * 1024
     const parsed = Number(maxUploadBytes)
     const normalized = Number.isFinite(parsed)
       ? Math.max(1 * 1024 * 1024, Math.floor(parsed))
       : maxUploadBytesDefault
     await setSetting('maxUploadBytes', String(normalized))
+    const thumbMode = String(thumbnailProcessing ?? '').trim() === 'backend' ? 'backend' : 'node'
+    await setSetting('thumbnailProcessing', thumbMode)
+    const thumbBytesParsed = Number(thumbnailMaxBytes)
+    const thumbBytesNorm = Number.isFinite(thumbBytesParsed)
+      ? Math.max(64 * 1024, Math.min(10 * 1024 * 1024, Math.floor(thumbBytesParsed)))
+      : 1 * 1024 * 1024
+    await setSetting('thumbnailMaxBytes', String(thumbBytesNorm))
+    const thumbWidthParsed = Number(thumbnailMaxWidth)
+    const thumbWidthNorm = Number.isFinite(thumbWidthParsed)
+      ? Math.max(1024, Math.min(2048, Math.floor(thumbWidthParsed)))
+      : 1600
+    await setSetting('thumbnailMaxWidth', String(thumbWidthNorm))
+    const skipBelowParsed = Number(thumbnailSkipBelowBytes)
+    const skipBelowNorm = Number.isFinite(skipBelowParsed)
+      ? Math.max(0, Math.min(50 * 1024 * 1024, Math.floor(skipBelowParsed)))
+      : 0
+    await setSetting('thumbnailSkipBelowBytes', String(skipBelowNorm))
     await saveNodes(nodes)
   }
 
@@ -349,6 +387,7 @@ const createSupabaseStore = (sb) => {
     const map = new Map(rows.map((row) => [row.key, row.value]))
     const listApi = map.get('listApi') ?? '/api/images/list'
     const enableLocalStorage = map.get('enableLocalStorage') === '1'
+    const mediaRequireAuth = map.get('mediaRequireAuth') !== '0'
     const maxUploadBytesRaw = map.get('maxUploadBytes')
     const maxUploadBytesDefault = 20 * 1024 * 1024
     const maxUploadBytesMax = 200 * 1024 * 1024
@@ -356,13 +395,33 @@ const createSupabaseStore = (sb) => {
     const maxUploadBytes = Number.isFinite(parsed)
       ? Math.max(1 * 1024 * 1024, Math.min(maxUploadBytesMax, Math.floor(parsed)))
       : maxUploadBytesDefault
+    const thumbnailProcessingRaw = String(map.get('thumbnailProcessing') ?? '').trim()
+    const thumbnailProcessing = thumbnailProcessingRaw === 'backend' ? 'backend' : 'node'
+    const thumbnailMaxBytesRaw = map.get('thumbnailMaxBytes')
+    const thumbBytesParsed = Number(thumbnailMaxBytesRaw)
+    const thumbnailMaxBytesDefault = 1 * 1024 * 1024
+    const thumbnailMaxBytes = Number.isFinite(thumbBytesParsed)
+      ? Math.max(64 * 1024, Math.min(10 * 1024 * 1024, Math.floor(thumbBytesParsed)))
+      : thumbnailMaxBytesDefault
+    const thumbnailMaxWidthRaw = map.get('thumbnailMaxWidth')
+    const thumbWidthParsed = Number(thumbnailMaxWidthRaw)
+    const thumbnailMaxWidthDefault = 1600
+    const thumbnailMaxWidth = Number.isFinite(thumbWidthParsed)
+      ? Math.max(1024, Math.min(2048, Math.floor(thumbWidthParsed)))
+      : thumbnailMaxWidthDefault
+    const thumbnailSkipBelowBytesRaw = map.get('thumbnailSkipBelowBytes')
+    const skipBelowParsed = Number(thumbnailSkipBelowBytesRaw)
+    const thumbnailSkipBelowBytes = Number.isFinite(skipBelowParsed)
+      ? Math.max(0, Math.min(50 * 1024 * 1024, Math.floor(skipBelowParsed)))
+      : 0
     const nodes = await getNodes()
-    return { listApi, nodes, enableLocalStorage, maxUploadBytes }
+    return { listApi, nodes, enableLocalStorage, mediaRequireAuth, maxUploadBytes, thumbnailProcessing, thumbnailMaxBytes, thumbnailMaxWidth, thumbnailSkipBelowBytes }
   }
 
-  const saveConfig = async (listApi, nodes, enableLocalStorage, maxUploadBytes) => {
+  const saveConfig = async (listApi, nodes, enableLocalStorage, mediaRequireAuth, maxUploadBytes, thumbnailProcessing, thumbnailMaxBytes, thumbnailMaxWidth, thumbnailSkipBelowBytes) => {
     await sb.upsert('settings', { key: 'listApi', value: listApi })
     await sb.upsert('settings', { key: 'enableLocalStorage', value: enableLocalStorage ? '1' : '0' })
+    await sb.upsert('settings', { key: 'mediaRequireAuth', value: mediaRequireAuth === false ? '0' : '1' })
     const maxUploadBytesDefault = 20 * 1024 * 1024
     const maxUploadBytesMax = 200 * 1024 * 1024
     const parsed = Number(maxUploadBytes)
@@ -370,6 +429,23 @@ const createSupabaseStore = (sb) => {
       ? Math.max(1 * 1024 * 1024, Math.min(maxUploadBytesMax, Math.floor(parsed)))
       : maxUploadBytesDefault
     await sb.upsert('settings', { key: 'maxUploadBytes', value: String(normalized) })
+    const thumbMode = String(thumbnailProcessing ?? '').trim() === 'backend' ? 'backend' : 'node'
+    await sb.upsert('settings', { key: 'thumbnailProcessing', value: thumbMode })
+    const thumbBytesParsed = Number(thumbnailMaxBytes)
+    const thumbBytesNorm = Number.isFinite(thumbBytesParsed)
+      ? Math.max(64 * 1024, Math.min(10 * 1024 * 1024, Math.floor(thumbBytesParsed)))
+      : 1 * 1024 * 1024
+    await sb.upsert('settings', { key: 'thumbnailMaxBytes', value: String(thumbBytesNorm) })
+    const thumbWidthParsed = Number(thumbnailMaxWidth)
+    const thumbWidthNorm = Number.isFinite(thumbWidthParsed)
+      ? Math.max(1024, Math.min(2048, Math.floor(thumbWidthParsed)))
+      : 1600
+    await sb.upsert('settings', { key: 'thumbnailMaxWidth', value: String(thumbWidthNorm) })
+    const skipBelowParsed = Number(thumbnailSkipBelowBytes)
+    const skipBelowNorm = Number.isFinite(skipBelowParsed)
+      ? Math.max(0, Math.min(50 * 1024 * 1024, Math.floor(skipBelowParsed)))
+      : 0
+    await sb.upsert('settings', { key: 'thumbnailSkipBelowBytes', value: String(skipBelowNorm) })
     await saveNodes(nodes)
   }
 
