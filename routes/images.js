@@ -3,7 +3,7 @@ import multer from 'multer'
 import fs from 'fs/promises'
 import fsSync from 'fs'
 import path from 'path'
-import { requireAuth } from '../middleware/auth.js'
+import { getAuthUsername, requireAuth } from '../middleware/auth.js'
 import { expressOk, expressFail } from '../server/utils/http.js'
 import { isImageFileName, normalizeMaxUploadBytesBasic as normalizeMaxUploadBytes, normalizePath, normalizeUploadFileName, resolvePath, sanitizeSingleNameBasic as sanitizeSingleName, validateImageUpload } from '../server/utils/paths.js'
 import { rootDir } from '../server/config.js'
@@ -390,9 +390,13 @@ router.get('/images/list', requireAuth({
     const config = await store.getConfig()
     const nodes = Array.isArray(config?.nodes) ? config.nodes : []
     const currentPath = normalizePath(req.query?.path ?? '/')
+    const publicPaths = await store.getPublicPaths()
+    const isPublicPath = publicPaths.includes(currentPath)
+    const loggedIn = Boolean(getAuthUsername(req))
     const enabledNodes = listEnabledPicmiNodes(nodes)
     if (enabledNodes.length > 0) {
       const merged = new Map()
+      const sourceByKey = new Map()
       let okCount = 0
       let errorCount = 0
       for (const node of enabledNodes) {
@@ -401,6 +405,8 @@ router.get('/images/list', requireAuth({
           errorCount += 1
           continue
         }
+        const sourceKey = String(node?.id ?? base)
+        if (sourceKey) sourceByKey.set(sourceKey, { base, rootDir: String(node?.rootDir || '/') })
         const url = new URL('/api/images/list', base)
         url.searchParams.set('path', joinNodePath(node?.rootDir || '/', currentPath))
         const { res: nodeRes, payload } = await fetchNodePayload(url, { headers: { ...buildNodeAuthHeaders(node) } })
@@ -420,24 +426,45 @@ router.get('/images/list', requireAuth({
           const rel = toRelativePath(it?.path, rootPath)
           if (!rel) continue
           if (it?.type === 'folder') {
-            if (!merged.has(rel)) merged.set(rel, { ...it, path: rel })
+            if (!merged.has(rel)) merged.set(rel, { item: { ...it, path: rel }, sources: null })
             continue
           }
           const kind = isImageFileName(it?.name) ? 'image' : 'file'
-          const nodePath = joinNodePath(node?.rootDir || '/', rel)
-          const blobUrl = new URL(`/blob${nodePath}`, base).toString()
-          const next = { ...it, type: kind, path: rel, url: buildRawUrl(rel), thumbUrl: kind === 'image' ? buildThumbUrl(rel) : undefined, blobUrl }
+          const next = { ...it, type: kind, path: rel, url: buildRawUrl(rel), thumbUrl: kind === 'image' ? buildThumbUrl(rel) : undefined }
           const prev = merged.get(rel)
           if (!prev) {
-            merged.set(rel, next)
+            merged.set(rel, { item: next, sources: sourceKey ? new Set([sourceKey]) : new Set() })
             continue
           }
-          const prevAt = String(prev?.uploadedAt ?? '')
+          if (prev.sources && sourceKey) prev.sources.add(sourceKey)
+          const prevAt = String(prev.item?.uploadedAt ?? '')
           const nextAt = String(next?.uploadedAt ?? '')
-          if (nextAt && (!prevAt || nextAt.localeCompare(prevAt) > 0)) merged.set(rel, next)
+          if (nextAt && (!prevAt || nextAt.localeCompare(prevAt) > 0)) prev.item = next
         }
       }
-      const items = [...merged.values()]
+      const items = [...merged.values()].map((entry) => {
+        if (!entry?.sources || entry.item?.type === 'folder' || (isPublicPath && !loggedIn)) return entry.item
+        const orderedNodes = orderEnabledPicmiNodes(enabledNodes, config?.nodeReadStrategy, entry.item?.path)
+        let source = null
+        for (const node of orderedNodes) {
+          const base = normalizeHttpBase(node?.address)
+          if (!base) continue
+          const key = String(node?.id ?? base)
+          if (entry.sources.has(key)) {
+            source = { base, rootDir: String(node?.rootDir || '/') }
+            break
+          }
+        }
+        if (!source && entry.sources.size > 0) {
+          const firstKey = entry.sources.values().next().value
+          source = sourceByKey.get(firstKey) ?? null
+        }
+        if (source?.base) {
+          const nodePath = joinNodePath(source.rootDir || '/', entry.item?.path)
+          entry.item.blobUrl = new URL(`/blob${nodePath}`, source.base).toString()
+        }
+        return entry.item
+      })
       const nodeError = okCount === 0 ? '节点不可达' : (errorCount > 0 ? '部分节点不可达' : undefined)
       return expressOk(res, { path: currentPath, items, nodeError })
     }

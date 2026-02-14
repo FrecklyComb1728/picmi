@@ -3,7 +3,7 @@ import { getQuery } from 'h3'
 import { rootDir } from '../../config.js'
 import { listEntries } from '../../utils/images-fs'
 import { isImageFileName, normalizePath } from '../../utils/paths.js'
-import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, listEnabledPicmiNodes, normalizeHttpBase, ok, requireAuth, toRelativePath, usePicmi } from '../../utils/nitro'
+import { buildNodeAuthHeaders, fail, fetchNodePayload, isLoggedIn, joinNodePath, listEnabledPicmiNodes, normalizeHttpBase, ok, orderEnabledPicmiNodes, requireAuth, toRelativePath, usePicmi } from '../../utils/nitro'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -22,10 +22,10 @@ export default defineEventHandler(async (event) => {
     const buildRawUrl = (relPath: string) => `/raw/${encodePathForRaw(relPath)}`
     const buildThumbUrl = (relPath: string) => `/thumb/${encodePathForRaw(relPath)}`
 
-    const auth = await requireAuth(event, async () => {
-      const list = await picmi.store.getPublicPaths()
-      return list.includes(currentPath)
-    })
+    const publicPaths = await picmi.store.getPublicPaths()
+    const isPublicPath = publicPaths.includes(currentPath)
+    const loggedIn = isLoggedIn(event)
+    const auth = await requireAuth(event, async () => isPublicPath)
     if (auth) return auth
 
     const config = await picmi.store.getConfig()
@@ -34,7 +34,8 @@ export default defineEventHandler(async (event) => {
       const enabledNodes = listEnabledPicmiNodes(nodes)
       if (enabledNodes.length === 0) return ok({ path: currentPath, items: [], nodeError: '未配置可用存储节点' } as any)
 
-      const merged = new Map<string, any>()
+      const merged = new Map<string, { item: any; sources: Set<string> | null }>()
+      const sourceByKey = new Map<string, { base: string; rootDir: string }>()
       let okCount = 0
       let errorCount = 0
 
@@ -44,6 +45,8 @@ export default defineEventHandler(async (event) => {
           errorCount += 1
           continue
         }
+        const sourceKey = String(node?.id ?? base)
+        if (sourceKey) sourceByKey.set(sourceKey, { base, rootDir: String(node?.rootDir || '/') })
         const url = new URL('/api/images/list', base)
         url.searchParams.set('path', joinNodePath(node?.rootDir || '/', currentPath))
         const { res, payload } = await fetchNodePayload(url, { headers: { ...buildNodeAuthHeaders(node) } })
@@ -63,25 +66,46 @@ export default defineEventHandler(async (event) => {
           const rel = toRelativePath(it?.path, rootPath)
           if (!rel) continue
           if (it?.type === 'folder') {
-            if (!merged.has(rel)) merged.set(rel, { ...it, path: rel })
+            if (!merged.has(rel)) merged.set(rel, { item: { ...it, path: rel }, sources: null })
             continue
           }
           const kind = isImageFileName(it?.name) ? 'image' : 'file'
-          const nodePath = joinNodePath(node?.rootDir || '/', rel)
-          const blobUrl = new URL(`/blob${nodePath}`, base).toString()
-          const next = { ...it, type: kind, path: rel, url: buildRawUrl(rel), thumbUrl: kind === 'image' ? buildThumbUrl(rel) : undefined, blobUrl }
+          const next = { ...it, type: kind, path: rel, url: buildRawUrl(rel), thumbUrl: kind === 'image' ? buildThumbUrl(rel) : undefined }
           const prev = merged.get(rel)
           if (!prev) {
-            merged.set(rel, next)
+            merged.set(rel, { item: next, sources: sourceKey ? new Set([sourceKey]) : new Set() })
             continue
           }
-          const prevAt = String(prev?.uploadedAt ?? '')
+          if (prev.sources && sourceKey) prev.sources.add(sourceKey)
+          const prevAt = String(prev.item?.uploadedAt ?? '')
           const nextAt = String(next?.uploadedAt ?? '')
-          if (nextAt && (!prevAt || nextAt.localeCompare(prevAt) > 0)) merged.set(rel, next)
+          if (nextAt && (!prevAt || nextAt.localeCompare(prevAt) > 0)) prev.item = next
         }
       }
 
-      const items = [...merged.values()]
+      const items = [...merged.values()].map((entry) => {
+        if (!entry?.sources || entry.item?.type === 'folder' || (isPublicPath && !loggedIn)) return entry.item
+        const orderedNodes = orderEnabledPicmiNodes(enabledNodes, config?.nodeReadStrategy, entry.item?.path)
+        let source = null as any
+        for (const node of orderedNodes) {
+          const base = normalizeHttpBase(node?.address)
+          if (!base) continue
+          const key = String(node?.id ?? base)
+          if (entry.sources.has(key)) {
+            source = { base, rootDir: String(node?.rootDir || '/') }
+            break
+          }
+        }
+        if (!source && entry.sources.size > 0) {
+          const firstKey = entry.sources.values().next().value
+          if (firstKey) source = sourceByKey.get(firstKey) ?? null
+        }
+        if (source?.base) {
+          const nodePath = joinNodePath(source.rootDir || '/', entry.item?.path)
+          entry.item.blobUrl = new URL(`/blob${nodePath}`, source.base).toString()
+        }
+        return entry.item
+      })
       const nodeError = okCount === 0 ? '节点不可达' : (errorCount > 0 ? '部分节点不可达' : undefined)
       return ok({ path: currentPath, items, nodeError } as any)
     }
