@@ -201,13 +201,55 @@ export const readResponseBufferWithLimit = async (res: Response, maxBytes: numbe
   return Buffer.concat(chunks, total)
 }
 
-export const pickEnabledPicmiNode = (nodes: any[]) => {
-  const list = Array.isArray(nodes) ? nodes : []
-  const enabled = list.filter((node) => node && node.enabled !== false)
-  return enabled.find((node) => String(node?.type ?? 'picmi-node') === 'picmi-node') ?? null
+let rrCursor = 0
+
+const normalizeReadStrategy = (value: any) => {
+  const mode = String(value ?? '').trim()
+  if (mode === 'random' || mode === 'path-hash' || mode === 'round-robin') return mode
+  return 'round-robin'
+}
+
+const hashString = (value: string) => {
+  let hash = 0
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0
+  }
+  return hash
+}
+
+const shuffleNodes = (items: any[]) => {
+  const list = [...items]
+  for (let i = list.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    const tmp = list[i]
+    list[i] = list[j]
+    list[j] = tmp
+  }
+  return list
 }
 
 export const listEnabledPicmiNodes = (nodes: any[]) => {
   const list = Array.isArray(nodes) ? nodes : []
   return list.filter((node) => node && node.enabled !== false && String(node?.type ?? 'picmi-node') === 'picmi-node')
+}
+
+export const orderEnabledPicmiNodes = (nodes: any[], strategy?: any, key?: any) => {
+  const enabled = listEnabledPicmiNodes(nodes)
+  if (enabled.length <= 1) return enabled
+  const mode = normalizeReadStrategy(strategy)
+  if (mode === 'random') return shuffleNodes(enabled)
+  let start = 0
+  if (mode === 'path-hash') {
+    const raw = String(key ?? '')
+    start = raw ? hashString(raw) % enabled.length : 0
+  } else {
+    start = rrCursor % enabled.length
+    rrCursor = (rrCursor + 1) % 2147483647
+  }
+  return enabled.map((_, index) => enabled[(start + index) % enabled.length])
+}
+
+export const pickEnabledPicmiNode = (nodes: any[], strategy?: any, key?: any) => {
+  const ordered = orderEnabledPicmiNodes(nodes, strategy, key)
+  return ordered[0] ?? null
 }

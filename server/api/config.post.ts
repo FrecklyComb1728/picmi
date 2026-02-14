@@ -19,6 +19,7 @@ export default defineEventHandler(async (event) => {
       thumbnailMaxBytes?: unknown
       thumbnailMaxWidth?: unknown
       thumbnailSkipBelowBytes?: unknown
+      nodeReadStrategy?: unknown
     }>(event)
     const listApi = body?.listApi
     const nodes = body?.nodes
@@ -45,6 +46,7 @@ export default defineEventHandler(async (event) => {
     const thumbnailMaxBytesRaw = body?.thumbnailMaxBytes
     const thumbnailMaxWidthRaw = body?.thumbnailMaxWidth
     const thumbnailSkipBelowBytesRaw = body?.thumbnailSkipBelowBytes
+    const nodeReadStrategyRaw = body?.nodeReadStrategy
     if (thumbnailMaxBytesRaw !== undefined) {
       const n = Number(thumbnailMaxBytesRaw)
       if (!Number.isFinite(n)) return fail(event, 400, 40001, '参数错误')
@@ -57,6 +59,11 @@ export default defineEventHandler(async (event) => {
       const n = Number(thumbnailSkipBelowBytesRaw)
       if (!Number.isFinite(n)) return fail(event, 400, 40001, '参数错误')
     }
+    if (nodeReadStrategyRaw !== undefined) {
+      const mode = String(nodeReadStrategyRaw ?? '').trim()
+      const allowed = mode === 'round-robin' || mode === 'random' || mode === 'path-hash'
+      if (!allowed) return fail(event, 400, 40001, '参数错误')
+    }
     const modeStr = String(thumbnailProcessingRaw ?? prev?.thumbnailProcessing ?? 'node').trim()
     const thumbnailProcessing = modeStr === 'backend' ? 'backend' : 'node'
     const thumbnailMaxBytes = thumbnailMaxBytesRaw ?? prev?.thumbnailMaxBytes
@@ -64,7 +71,7 @@ export default defineEventHandler(async (event) => {
     const thumbnailSkipBelowBytes = thumbnailSkipBelowBytesRaw ?? prev?.thumbnailSkipBelowBytes
     const hasNonPicmiNode = (nodes as any[]).some((node) => node && node.enabled !== false && String(node?.type ?? 'picmi-node') !== 'picmi-node')
     if (thumbnailProcessing === 'backend' && hasNonPicmiNode) return fail(event, 400, 40004, '存在非PicMi-Node节点时不可更改缩略图处理位置')
-    await picmi.store.saveConfig(listApiStr, nodes, enableLocalStorage, mediaRequireAuth, maxUploadBytesRaw, thumbnailProcessing, thumbnailMaxBytes, thumbnailMaxWidth, thumbnailSkipBelowBytes)
+    await picmi.store.saveConfig(listApiStr, nodes, enableLocalStorage, mediaRequireAuth, maxUploadBytesRaw, thumbnailProcessing, thumbnailMaxBytes, thumbnailMaxWidth, thumbnailSkipBelowBytes, nodeReadStrategyRaw)
     return ok(null)
   } catch {
     return fail(event, 500, 1, '服务异常')

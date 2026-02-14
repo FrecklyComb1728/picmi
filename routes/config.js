@@ -18,7 +18,7 @@ router.get('/config', requireAdmin(), async (req, res, next) => {
 
 router.post('/config', requireAdmin(), async (req, res, next) => {
   try {
-    const { listApi, nodes, enableLocalStorage, mediaRequireAuth, maxUploadBytes, thumbnailProcessing, thumbnailMaxBytes, thumbnailMaxWidth, thumbnailSkipBelowBytes } = req.body ?? {}
+    const { listApi, nodes, enableLocalStorage, mediaRequireAuth, maxUploadBytes, thumbnailProcessing, thumbnailMaxBytes, thumbnailMaxWidth, thumbnailSkipBelowBytes, nodeReadStrategy } = req.body ?? {}
     if (!listApi || !Array.isArray(nodes)) return expressFail(res, 400, 40001, '参数错误')
     const listApiStr = String(listApi).trim()
     if (!listApiStr.startsWith('/api/')) return expressFail(res, 400, 40001, '参数错误')
@@ -40,6 +40,11 @@ router.post('/config', requireAdmin(), async (req, res, next) => {
       const n = Number(thumbnailSkipBelowBytes)
       if (!Number.isFinite(n)) return expressFail(res, 400, 40001, '参数错误')
     }
+    if (nodeReadStrategy !== undefined) {
+      const mode = String(nodeReadStrategy ?? '').trim()
+      const allowed = mode === 'round-robin' || mode === 'random' || mode === 'path-hash'
+      if (!allowed) return expressFail(res, 400, 40001, '参数错误')
+    }
     const hasEnabledNode = nodes.some((node) => node && node.enabled !== false)
     if (enableLocalStorage === true && hasEnabledNode) {
       return expressFail(res, 400, 40003, '本地存储与存储节点不可同时启用')
@@ -58,7 +63,7 @@ router.post('/config', requireAdmin(), async (req, res, next) => {
     if (nextMode === 'backend' && hasNonPicmiNode) {
       return expressFail(res, 400, 40004, '存在非PicMi-Node节点时不可更改缩略图处理位置')
     }
-    await store.saveConfig(listApiStr, nodes, enableLocalStorage === true, nextMediaRequireAuth, maxUploadBytes, nextMode, nextMaxBytes, nextMaxWidth, nextSkipBelow)
+    await store.saveConfig(listApiStr, nodes, enableLocalStorage === true, nextMediaRequireAuth, maxUploadBytes, nextMode, nextMaxBytes, nextMaxWidth, nextSkipBelow, nodeReadStrategy)
     return expressOk(res, null)
   } catch (error) {
     next(error)

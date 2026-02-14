@@ -41,9 +41,52 @@ const joinNodePath = (root, rel) => {
   return normalizePath(`${rootNorm}/${relNorm}`)
 }
 
+let rrCursor = 0
+
+const normalizeReadStrategy = (value) => {
+  const mode = String(value ?? '').trim()
+  if (mode === 'random' || mode === 'path-hash' || mode === 'round-robin') return mode
+  return 'round-robin'
+}
+
+const hashString = (value) => {
+  let hash = 0
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0
+  }
+  return hash
+}
+
+const shuffleNodes = (items) => {
+  const list = [...items]
+  for (let i = list.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    const tmp = list[i]
+    list[i] = list[j]
+    list[j] = tmp
+  }
+  return list
+}
+
 const listEnabledPicmiNodes = (nodes) => {
   const list = Array.isArray(nodes) ? nodes : []
   return list.filter((n) => n && n.enabled !== false && String(n?.type ?? 'picmi-node') === 'picmi-node')
+}
+
+const orderEnabledPicmiNodes = (nodes, strategy, key) => {
+  const enabled = listEnabledPicmiNodes(nodes)
+  if (enabled.length <= 1) return enabled
+  const mode = normalizeReadStrategy(strategy)
+  if (mode === 'random') return shuffleNodes(enabled)
+  let start = 0
+  if (mode === 'path-hash') {
+    const raw = String(key ?? '')
+    start = raw ? hashString(raw) % enabled.length : 0
+  } else {
+    start = rrCursor % enabled.length
+    rrCursor = (rrCursor + 1) % 2147483647
+  }
+  return enabled.map((_, index) => enabled[(start + index) % enabled.length])
 }
 
 router.get('/raw/:path(*)', requireAuth({
@@ -65,13 +108,14 @@ router.get('/raw/:path(*)', requireAuth({
     const config = await store.getConfig()
     const nodes = Array.isArray(config?.nodes) ? config.nodes : []
     const enabledNodes = listEnabledPicmiNodes(nodes)
-    if (enabledNodes.length > 0) {
+    const orderedNodes = orderEnabledPicmiNodes(enabledNodes, config?.nodeReadStrategy, relPath)
+    if (orderedNodes.length > 0) {
       const name = path.posix.basename(relPath)
       const asciiName = name.replace(/[\r\n]/g, '').replace(/"/g, '').replace(/[\\/]/g, '').replace(/[^\x20-\x7E]/g, '_')
       const utf8Name = encodeURIComponent(name).replace(/%20/g, ' ')
       res.setHeader('content-disposition', `inline; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`)
       let sawReachable = false
-      for (const node of enabledNodes) {
+      for (const node of orderedNodes) {
         const base = normalizeHttpBase(node?.address)
         if (!base) continue
         const nodePath = joinNodePath(node?.rootDir || '/', relPath)

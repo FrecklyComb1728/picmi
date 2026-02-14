@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 import { getQuery, setResponseHeader, setResponseStatus } from 'h3'
 import { rootDir } from '../../config.js'
 import { normalizePath } from '../../utils/paths.js'
-import { buildNodeAuthHeaders, fail, joinNodePath, listEnabledPicmiNodes, normalizeHttpBase, readResponseBufferWithLimit, requireAuth, usePicmi } from '../../utils/nitro'
+import { buildNodeAuthHeaders, fail, joinNodePath, listEnabledPicmiNodes, normalizeHttpBase, orderEnabledPicmiNodes, readResponseBufferWithLimit, requireAuth, usePicmi } from '../../utils/nitro'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -29,9 +29,10 @@ export default defineEventHandler(async (event) => {
     setResponseHeader(event, 'content-disposition', `inline; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`)
 
     const enabledNodes = listEnabledPicmiNodes(nodes)
-    if (!enableLocalStorage && enabledNodes.length > 0) {
+    const orderedNodes = orderEnabledPicmiNodes(enabledNodes, config?.nodeReadStrategy, relPath)
+    if (!enableLocalStorage && orderedNodes.length > 0) {
       let sawReachable = false
-      for (const node of enabledNodes) {
+      for (const node of orderedNodes) {
         const base = normalizeHttpBase(node?.address)
         if (!base) continue
         const nodePath = joinNodePath(node?.rootDir || '/', relPath)

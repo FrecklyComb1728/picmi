@@ -26,6 +26,10 @@
         <n-select v-model:value="thumbnailProcessing" :options="thumbnailProcessingOptions" class="w-full" :disabled="thumbnailProcessingLocked" />
       </n-form-item>
 
+      <n-form-item label="节点读取算法">
+        <n-select v-model:value="nodeReadStrategy" :options="nodeReadStrategyOptions" class="w-full" />
+      </n-form-item>
+
       <n-form-item label="小图跳过缩略图阈值(MB)">
         <n-input-number v-model:value="thumbnailSkipBelowMb" :min="0" :step="0.5" class="w-full" />
       </n-form-item>
@@ -259,12 +263,19 @@ const mediaRequireAuth = ref(true)
 const maxUploadMb = ref(20)
 const thumbnailProcessing = ref<'node' | 'backend'>('node')
 const thumbnailSkipBelowMb = ref<number>(0)
+const nodeReadStrategy = ref<'round-robin' | 'random' | 'path-hash'>('round-robin')
 const nodes = ref<NodeConfig[]>([])
 const saving = ref(false)
 
 const thumbnailProcessingOptions = [
   { label: '存储节点处理', value: 'node' },
   { label: '主节点处理', value: 'backend' }
+]
+
+const nodeReadStrategyOptions = [
+  { label: '轮询', value: 'round-robin' },
+  { label: '随机', value: 'random' },
+  { label: '路径哈希', value: 'path-hash' }
 ]
 
 const thumbnailProcessingLocked = computed(() => {
@@ -296,11 +307,13 @@ const load = async () => {
       maxUploadBytes?: number
       thumbnailProcessing?: 'node' | 'backend'
       thumbnailSkipBelowBytes?: number
+      nodeReadStrategy?: 'round-robin' | 'random' | 'path-hash'
     }>('/config', { method: 'GET' })
     listApi.value = res.listApi ?? '/api/images/list'
     enableLocalStorage.value = res.enableLocalStorage ?? false
     mediaRequireAuth.value = res.mediaRequireAuth !== false
     thumbnailProcessing.value = res.thumbnailProcessing === 'backend' ? 'backend' : 'node'
+    nodeReadStrategy.value = res.nodeReadStrategy === 'random' || res.nodeReadStrategy === 'path-hash' ? res.nodeReadStrategy : 'round-robin'
     const bytes = Number(res.maxUploadBytes)
     maxUploadMb.value = Number.isFinite(bytes) && bytes > 0 ? Math.max(1, Math.floor(bytes / (1024 * 1024))) : 20
     const skipBytes = Number(res.thumbnailSkipBelowBytes)
@@ -413,7 +426,8 @@ const saveConfig = async () => {
         mediaRequireAuth: mediaRequireAuth.value,
         maxUploadBytes: Math.floor(Number(maxUploadMb.value) * 1024 * 1024),
         thumbnailProcessing: thumbnailProcessing.value,
-        thumbnailSkipBelowBytes: Math.floor(Math.max(0, Number(thumbnailSkipBelowMb.value) || 0) * 1024 * 1024)
+        thumbnailSkipBelowBytes: Math.floor(Math.max(0, Number(thumbnailSkipBelowMb.value) || 0) * 1024 * 1024),
+        nodeReadStrategy: nodeReadStrategy.value
       }
     })
     message.success('已保存')

@@ -414,11 +414,15 @@ const createSupabaseStore = (sb) => {
     const thumbnailSkipBelowBytes = Number.isFinite(skipBelowParsed)
       ? Math.max(0, Math.min(50 * 1024 * 1024, Math.floor(skipBelowParsed)))
       : 0
+    const nodeReadStrategyRaw = String(map.get('nodeReadStrategy') ?? '').trim()
+    const nodeReadStrategy = nodeReadStrategyRaw === 'random' || nodeReadStrategyRaw === 'path-hash' || nodeReadStrategyRaw === 'round-robin'
+      ? nodeReadStrategyRaw
+      : 'round-robin'
     const nodes = await getNodes()
-    return { listApi, nodes, enableLocalStorage, mediaRequireAuth, maxUploadBytes, thumbnailProcessing, thumbnailMaxBytes, thumbnailMaxWidth, thumbnailSkipBelowBytes }
+    return { listApi, nodes, enableLocalStorage, mediaRequireAuth, maxUploadBytes, thumbnailProcessing, thumbnailMaxBytes, thumbnailMaxWidth, thumbnailSkipBelowBytes, nodeReadStrategy }
   }
 
-  const saveConfig = async (listApi, nodes, enableLocalStorage, mediaRequireAuth, maxUploadBytes, thumbnailProcessing, thumbnailMaxBytes, thumbnailMaxWidth, thumbnailSkipBelowBytes) => {
+  const saveConfig = async (listApi, nodes, enableLocalStorage, mediaRequireAuth, maxUploadBytes, thumbnailProcessing, thumbnailMaxBytes, thumbnailMaxWidth, thumbnailSkipBelowBytes, nodeReadStrategy) => {
     await sb.upsert('settings', { key: 'listApi', value: listApi })
     await sb.upsert('settings', { key: 'enableLocalStorage', value: enableLocalStorage ? '1' : '0' })
     await sb.upsert('settings', { key: 'mediaRequireAuth', value: mediaRequireAuth === false ? '0' : '1' })
@@ -446,6 +450,11 @@ const createSupabaseStore = (sb) => {
       ? Math.max(0, Math.min(50 * 1024 * 1024, Math.floor(skipBelowParsed)))
       : 0
     await sb.upsert('settings', { key: 'thumbnailSkipBelowBytes', value: String(skipBelowNorm) })
+    const readStrategyRaw = String(nodeReadStrategy ?? '').trim()
+    const readStrategy = readStrategyRaw === 'random' || readStrategyRaw === 'path-hash' || readStrategyRaw === 'round-robin'
+      ? readStrategyRaw
+      : 'round-robin'
+    await sb.upsert('settings', { key: 'nodeReadStrategy', value: readStrategy })
     await saveNodes(nodes)
   }
 
