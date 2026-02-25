@@ -84,6 +84,19 @@ const shuffleNodes = (items) => {
   return list
 }
 
+const listCache = new Map()
+
+const makeListCacheKey = (mode, currentPath, isPublicPath, loggedIn) => {
+  const pathNorm = normalizePath(currentPath ?? '/')
+  const pub = isPublicPath ? '1' : '0'
+  const auth = loggedIn ? '1' : '0'
+  return `${mode}:${pub}:${auth}:${pathNorm}`
+}
+
+const clearListCache = () => {
+  listCache.clear()
+}
+
 const toRelativePath = (fullPath, rootPath) => {
   const fullNorm = normalizePath(fullPath || '/')
   const rootNorm = normalizePath(rootPath || '/')
@@ -394,6 +407,10 @@ router.get('/images/list', requireAuth({
     const isPublicPath = publicPaths.includes(currentPath)
     const loggedIn = Boolean(getAuthUsername(req))
     const enabledNodes = listEnabledPicmiNodes(nodes)
+    const mode = enabledNodes.length > 0 ? 'nodes' : 'local'
+    const cacheKey = makeListCacheKey(mode, currentPath, isPublicPath, loggedIn)
+    const cached = listCache.get(cacheKey)
+    if (cached) return expressOk(res, cached)
     if (enabledNodes.length > 0) {
       const merged = new Map()
       const sourceByKey = new Map()
@@ -466,10 +483,13 @@ router.get('/images/list', requireAuth({
         return entry.item
       })
       const nodeError = okCount === 0 ? '节点不可达' : (errorCount > 0 ? '部分节点不可达' : undefined)
-      return expressOk(res, { path: currentPath, items, nodeError })
+      const payload = { path: currentPath, items, nodeError }
+      listCache.set(cacheKey, payload)
+      return expressOk(res, payload)
     }
     const root = path.resolve(rootDir, req.app.locals.config.storageRoot)
     const data = await listEntries(root, currentPath)
+    listCache.set(cacheKey, data)
     return expressOk(res, data)
   } catch (error) {
     next(error)
@@ -627,6 +647,7 @@ router.post('/images/mkdir', requireAuth(), async (req, res, next) => {
     if (fsSync.existsSync(target)) return expressFail(res, 409, 40901, '文件夹已存在')
     
     await ensureDir(target)
+    clearListCache()
     return expressOk(res, null)
   } catch (error) {
     next(error)
@@ -672,6 +693,7 @@ router.post('/images/upload', requireAuth(), uploadSingle, async (req, res, next
         }
         if (!firstPayload) firstPayload = payload
       }
+      clearListCache()
       return res.status(200).json(firstPayload ?? { code: 0, message: 'ok', data: null })
     }
 
@@ -680,6 +702,7 @@ router.post('/images/upload', requireAuth(), uploadSingle, async (req, res, next
     if (!override && fsSync.existsSync(target)) return expressFail(res, 409, 40901, '文件已存在')
     await ensureDir(path.dirname(target))
     await fs.writeFile(target, file.buffer)
+    clearListCache()
     return expressOk(res, null)
   } catch (error) {
     next(error)
@@ -729,6 +752,7 @@ router.post('/images/upload-base64', requireAuth(), async (req, res, next) => {
         }
         if (!firstPayload) firstPayload = payload
       }
+      clearListCache()
       return res.status(200).json(firstPayload ?? { code: 0, message: 'ok', data: null })
     }
 
@@ -736,6 +760,7 @@ router.post('/images/upload-base64', requireAuth(), async (req, res, next) => {
     const { target } = resolvePath(root, path.posix.join(normalizedCurrentPath, safeName))
     await ensureDir(path.dirname(target))
     await fs.writeFile(target, buf)
+    clearListCache()
     return expressOk(res, null)
   } catch (error) {
     next(error)
@@ -773,6 +798,7 @@ router.post('/images/delete', requireAuth(), async (req, res, next) => {
         }
         if (!firstPayload) firstPayload = payload
       }
+      clearListCache()
       return res.status(200).json(firstPayload ?? { code: 0, message: 'ok', data: null })
     }
 
@@ -780,6 +806,7 @@ router.post('/images/delete', requireAuth(), async (req, res, next) => {
       const { target } = resolvePath(root, p)
       await removeRecursive(target)
     }
+    clearListCache()
     return expressOk(res, null)
   } catch (error) {
     next(error)
@@ -818,6 +845,7 @@ router.post('/images/rename', requireAuth(), async (req, res, next) => {
         }
         if (!firstPayload) firstPayload = payload
       }
+      clearListCache()
       return res.status(200).json(firstPayload ?? { code: 0, message: 'ok', data: null })
     }
 
@@ -825,6 +853,7 @@ router.post('/images/rename', requireAuth(), async (req, res, next) => {
     const nextNormalized = path.posix.join(path.posix.dirname(normalized), safeName)
     const next = resolvePath(root, nextNormalized).target
     await fs.rename(target, next)
+    clearListCache()
     return expressOk(res, null)
   } catch (error) {
     next(error)
@@ -866,6 +895,7 @@ router.post('/images/move', requireAuth(), async (req, res, next) => {
         }
         if (!firstPayload) firstPayload = payload
       }
+      clearListCache()
       return res.status(200).json(firstPayload ?? { code: 0, message: 'ok', data: null })
     }
 
@@ -875,6 +905,7 @@ router.post('/images/move', requireAuth(), async (req, res, next) => {
       await ensureDir(path.dirname(target))
       await fs.rename(from, target)
     }
+    clearListCache()
     return expressOk(res, null)
   } catch (error) {
     next(error)
@@ -916,6 +947,7 @@ router.post('/images/copy', requireAuth(), async (req, res, next) => {
         }
         if (!firstPayload) firstPayload = payload
       }
+      clearListCache()
       return res.status(200).json(firstPayload ?? { code: 0, message: 'ok', data: null })
     }
 
@@ -924,6 +956,7 @@ router.post('/images/copy', requireAuth(), async (req, res, next) => {
       const target = resolvePath(root, path.posix.join(dest, path.basename(from))).target
       await copyRecursive(from, target)
     }
+    clearListCache()
     return expressOk(res, null)
   } catch (error) {
     next(error)

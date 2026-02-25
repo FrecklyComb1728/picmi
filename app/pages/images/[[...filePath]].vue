@@ -244,7 +244,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, reactive, h } from 'vue'
+import { ref, computed, watch, reactive, h, onMounted } from 'vue'
 import { 
   NBreadcrumb, NBreadcrumbItem, NIcon, NInput, NInputGroup, NButton, NButtonGroup, 
   NPopselect, NSkeleton, NEmpty, NPagination, NModal, NSelect, NDropdown, useMessage, useDialog 
@@ -384,6 +384,17 @@ const sortOptions = [
   { label: '文件小->大', value: 'size-asc' }
 ]
 const sort = ref<string>('default')
+
+onMounted(() => {
+  const saved = localStorage.getItem('picmi-sort')
+  if (saved && sortOptions.some(o => o.value === saved)) {
+    sort.value = saved
+  }
+})
+
+watch(sort, (val) => {
+  localStorage.setItem('picmi-sort', val)
+})
 const pageSize = ref(40)
 const pageSizeOptions = [
   { label: '每页 20', value: 20 },

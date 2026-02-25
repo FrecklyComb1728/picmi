@@ -39,8 +39,6 @@ export default defineEventHandler(async (event) => {
     if (enableLocalStorage && hasEnabledNode) return fail(event, 400, 40003, '本地存储与存储节点不可同时启用')
 
     const prev = await picmi.store.getConfig()
-    const prevNodes = Array.isArray(prev?.nodes) ? prev.nodes : []
-    await syncNewNodes(prevNodes, nodes as any[])
     const mediaRequireAuth = mediaRequireAuthRaw !== undefined ? mediaRequireAuthRaw === true : prev?.mediaRequireAuth !== false
     const thumbnailProcessingRaw = body?.thumbnailProcessing
     const thumbnailMaxBytesRaw = body?.thumbnailMaxBytes

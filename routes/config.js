@@ -51,8 +51,6 @@ router.post('/config', requireAdmin(), async (req, res, next) => {
     }
     const store = req.app.locals.store
     const prev = await store.getConfig()
-    const prevNodes = Array.isArray(prev?.nodes) ? prev.nodes : []
-    await syncNewNodes(prevNodes, nodes)
     const modeStr = String(thumbnailProcessing ?? prev?.thumbnailProcessing ?? 'node').trim()
     const nextMode = modeStr === 'backend' ? 'backend' : 'node'
     const nextMaxBytes = thumbnailMaxBytes !== undefined ? thumbnailMaxBytes : prev?.thumbnailMaxBytes
