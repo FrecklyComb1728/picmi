@@ -125,7 +125,7 @@ const ensureThumbLocal = async (root, relPath, maxWidth) => {
   const targetWidth = Math.max(1024, Math.floor(Number(maxWidth) || 1600))
   const targetHeight = targetWidth
   const quality = 85
-  const effort = 2
+  const effort = 1
   const meta = await sharp(src, { failOnError: false }).metadata()
   const metaWidth = Number(meta.width)
   const metaHeight = Number(meta.height)
@@ -154,7 +154,7 @@ const buildThumbBuffer = async (relPath, source, maxWidth) => {
   const targetWidth = Math.max(1024, Math.floor(Number(maxWidth) || 1600))
   const targetHeight = targetWidth
   const quality = 85
-  const effort = 2
+  const effort = 1
   const meta = await sharp(source, { failOnError: false }).metadata()
   const metaWidth = Number(meta.width)
   const metaHeight = Number(meta.height)
