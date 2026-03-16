@@ -148,6 +148,30 @@ const ensureThumbLocal = async (root, relPath, maxWidth) => {
   return thumb
 }
 
+const buildThumbBuffer = async (relPath, source, maxWidth) => {
+  const ext = path.posix.extname(relPath).toLowerCase()
+  if (ext === '.svg') return source
+  const targetWidth = Math.max(1024, Math.floor(Number(maxWidth) || 1600))
+  const targetHeight = targetWidth
+  const quality = 85
+  const effort = 2
+  const meta = await sharp(source, { failOnError: false }).metadata()
+  const metaWidth = Number(meta.width)
+  const metaHeight = Number(meta.height)
+  const baseWidth = Number.isFinite(metaWidth) && metaWidth > 0 ? metaWidth : targetWidth
+  const baseHeight = Number.isFinite(metaHeight) && metaHeight > 0 ? metaHeight : targetHeight
+  let scale = 1
+  if (baseWidth > targetWidth) scale = targetWidth / baseWidth
+  else if (baseHeight > targetHeight) scale = targetHeight / baseHeight
+  const newWidth = Math.floor(baseWidth * scale)
+  const newHeight = Math.floor(baseHeight * scale)
+  const out = await sharp(source, { failOnError: false })
+    .resize({ width: newWidth, height: newHeight, fit: 'inside', withoutEnlargement: true })
+    .avif({ quality, effort })
+    .toBuffer()
+  return out
+}
+
 router.get('/thumb/:path(*)', requireAuth({
   allow: async (req) => {
     const store = req.app.locals.store
@@ -168,9 +192,10 @@ router.get('/thumb/:path(*)', requireAuth({
     const config = await store.getConfig()
     const enableLocalStorage = config?.enableLocalStorage === true
     const nodes = Array.isArray(config?.nodes) ? config.nodes : []
+    const hasNonPicmiNode = nodes.some((n) => n && n.enabled !== false && String(n?.type ?? 'picmi-node') !== 'picmi-node')
     const enabledNodes = listEnabledPicmiNodes(nodes)
     const orderedNodes = orderEnabledPicmiNodes(enabledNodes, config?.nodeReadStrategy, relPath)
-    const thumbnailProcessing = String(config?.thumbnailProcessing ?? 'node').trim() === 'backend' ? 'backend' : 'node'
+    const effectiveNodeThumbMode = hasNonPicmiNode ? 'backend' : 'node'
     const defaultMaxBytes = Math.max(64 * 1024, Math.min(10 * 1024 * 1024, Math.floor(Number(config?.thumbnailMaxBytes ?? 1 * 1024 * 1024) || 1 * 1024 * 1024)))
     const defaultMaxWidth = Math.max(1024, Math.min(2048, Math.floor(Number(config?.thumbnailMaxWidth ?? 1600) || 1600)))
     const thumbSkipBelowBytes = Math.max(0, Math.min(50 * 1024 * 1024, Math.floor(Number(config?.thumbnailSkipBelowBytes ?? 0) || 0)))
@@ -181,12 +206,14 @@ router.get('/thumb/:path(*)', requireAuth({
 
     if (!enableLocalStorage && orderedNodes.length > 0) {
       let sawReachable = false
+      const reachable = []
       for (const node of orderedNodes) {
         const base = normalizeHttpBase(node?.address)
         if (!base) continue
         const nodePath = joinNodePath(node?.rootDir || '/', relPath)
+        reachable.push({ node, base, nodePath })
 
-        if (thumbnailProcessing === 'node' && thumbSkipBelowBytes > 0) {
+        if (effectiveNodeThumbMode === 'node' && thumbSkipBelowBytes > 0) {
           const rawUrl = new URL(`/uploads${nodePath}`, base)
           const controller0 = new AbortController()
           const t0 = setTimeout(() => controller0.abort(), 10_000)
@@ -231,7 +258,7 @@ router.get('/thumb/:path(*)', requireAuth({
         url.searchParams.set('path', nodePath)
         url.searchParams.set('maxBytes', String(maxBytes))
         url.searchParams.set('maxWidth', String(maxWidth))
-        if (thumbnailProcessing === 'backend') url.searchParams.set('noGenerate', '1')
+        if (effectiveNodeThumbMode === 'backend') url.searchParams.set('noGenerate', '1')
         const controller = new AbortController()
         const t = setTimeout(() => controller.abort(), 15_000)
         let nodeRes
@@ -244,30 +271,6 @@ router.get('/thumb/:path(*)', requireAuth({
         }
         sawReachable = true
         if (!nodeRes?.ok) {
-          if (thumbnailProcessing === 'backend' && nodeRes?.status === 404) {
-            const rawUrl = new URL(`/uploads${nodePath}`, base)
-            const controller2 = new AbortController()
-            const t2 = setTimeout(() => controller2.abort(), 15_000)
-            let rawRes
-            try {
-              rawRes = await fetch(rawUrl, { redirect: 'error', headers: { ...buildNodeAuthHeaders(node) }, signal: controller2.signal })
-            } catch {
-              continue
-            } finally {
-              clearTimeout(t2)
-            }
-            if (!rawRes?.ok) continue
-            const contentType = rawRes.headers.get('content-type')
-            if (contentType) res.setHeader('content-type', contentType)
-            const cacheControl = rawRes.headers.get('cache-control')
-            if (cacheControl) res.setHeader('cache-control', cacheControl)
-            const lastModified = rawRes.headers.get('last-modified')
-            if (lastModified) res.setHeader('last-modified', lastModified)
-            const etag = rawRes.headers.get('etag')
-            if (etag) res.setHeader('etag', etag)
-            const buf = Buffer.from(await rawRes.arrayBuffer())
-            return res.status(200).send(buf)
-          }
           if (nodeRes?.status === 404) continue
           continue
         }
@@ -281,6 +284,50 @@ router.get('/thumb/:path(*)', requireAuth({
         if (etag) res.setHeader('etag', etag)
         const buf = Buffer.from(await nodeRes.arrayBuffer())
         return res.status(200).send(buf)
+      }
+      if (sawReachable && effectiveNodeThumbMode === 'backend') {
+        for (const item of reachable) {
+          const rawUrl = new URL(`/uploads${item.nodePath}`, item.base)
+          const controller = new AbortController()
+          const t = setTimeout(() => controller.abort(), 15_000)
+          let rawRes
+          try {
+            rawRes = await fetch(rawUrl, { redirect: 'error', headers: { ...buildNodeAuthHeaders(item.node) }, signal: controller.signal })
+          } catch {
+            rawRes = null
+          } finally {
+            clearTimeout(t)
+          }
+          if (!rawRes?.ok) continue
+          const rawBuf = Buffer.from(await rawRes.arrayBuffer())
+          if (thumbSkipBelowBytes > 0 && rawBuf.length <= thumbSkipBelowBytes) {
+            const contentType = rawRes.headers.get('content-type')
+            if (contentType) res.setHeader('content-type', contentType)
+            const cacheControl = rawRes.headers.get('cache-control')
+            if (cacheControl) res.setHeader('cache-control', cacheControl)
+            const lastModified = rawRes.headers.get('last-modified')
+            if (lastModified) res.setHeader('last-modified', lastModified)
+            const etag = rawRes.headers.get('etag')
+            if (etag) res.setHeader('etag', etag)
+            return res.status(200).send(rawBuf)
+          }
+          const ext = path.posix.extname(relPath).toLowerCase()
+          if (ext === '.svg') {
+            res.type('image/svg+xml')
+            return res.status(200).send(rawBuf)
+          }
+          const outBuf = await buildThumbBuffer(relPath, rawBuf, maxWidth)
+          try {
+            const formThumb = new FormData()
+            formThumb.set('thumb', '1')
+            formThumb.set('originPath', item.nodePath)
+            formThumb.set('file', new Blob([new Uint8Array(outBuf)]), `${path.posix.basename(relPath)}.avif`)
+            const thumbUploadUrl = new URL('/api/images/upload', item.base)
+            await fetch(thumbUploadUrl, { method: 'POST', headers: { ...buildNodeAuthHeaders(item.node) }, body: formThumb, redirect: 'error' })
+          } catch {}
+          res.type('image/avif')
+          return res.status(200).send(outBuf)
+        }
       }
       if (sawReachable) return expressFail(res, 404, 40401, '文件不存在')
       return expressFail(res, 502, 50201, '节点不可达')

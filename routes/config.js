@@ -57,10 +57,6 @@ router.post('/config', requireAdmin(), async (req, res, next) => {
     const nextMaxWidth = thumbnailMaxWidth !== undefined ? thumbnailMaxWidth : prev?.thumbnailMaxWidth
     const nextMediaRequireAuth = mediaRequireAuth !== undefined ? mediaRequireAuth === true : prev?.mediaRequireAuth !== false
     const nextSkipBelow = thumbnailSkipBelowBytes !== undefined ? thumbnailSkipBelowBytes : prev?.thumbnailSkipBelowBytes
-    const hasNonPicmiNode = nodes.some((node) => node && node.enabled !== false && String(node?.type ?? 'picmi-node') !== 'picmi-node')
-    if (nextMode === 'backend' && hasNonPicmiNode) {
-      return expressFail(res, 400, 40004, '存在非PicMi-Node节点时不可更改缩略图处理位置')
-    }
     await store.saveConfig(listApiStr, nodes, enableLocalStorage === true, nextMediaRequireAuth, maxUploadBytes, nextMode, nextMaxBytes, nextMaxWidth, nextSkipBelow, nodeReadStrategy)
     return expressOk(res, null)
   } catch (error) {

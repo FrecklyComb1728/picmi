@@ -84,9 +84,34 @@ const ensureThumbLocal = async (root: string, relPath: string, maxWidth: number)
   return thumb
 }
 
+const buildThumbBuffer = async (relPath: string, source: Buffer, maxWidth: number) => {
+  const ext = path.posix.extname(relPath).toLowerCase()
+  if (ext === '.svg') return source
+  const targetWidth = Math.max(1024, Math.floor(Number(maxWidth) || 1600))
+  const targetHeight = targetWidth
+  const quality = 85
+  const effort = 2
+  const meta = await sharp(source, { failOnError: false }).metadata()
+  const metaWidth = Number(meta.width)
+  const metaHeight = Number(meta.height)
+  const baseWidth = Number.isFinite(metaWidth) && metaWidth > 0 ? metaWidth : targetWidth
+  const baseHeight = Number.isFinite(metaHeight) && metaHeight > 0 ? metaHeight : targetHeight
+  let scale = 1
+  if (baseWidth > targetWidth) scale = targetWidth / baseWidth
+  else if (baseHeight > targetHeight) scale = targetHeight / baseHeight
+  const newWidth = Math.floor(baseWidth * scale)
+  const newHeight = Math.floor(baseHeight * scale)
+  const out = await sharp(source, { failOnError: false })
+    .resize({ width: newWidth, height: newHeight, fit: 'inside', withoutEnlargement: true })
+    .avif({ quality, effort })
+    .toBuffer()
+  return out
+}
+
 export default defineEventHandler(async (event) => {
   try {
     const picmi = await usePicmi(event)
+    const logger = picmi.logger
     const params = (event.context.params || {}) as { path?: string | string[] }
     const rawPath = Array.isArray(params.path) ? params.path.join('/') : String(params.path ?? '')
     const relPath = normalizePath(`/${rawPath}`)
@@ -108,7 +133,8 @@ export default defineEventHandler(async (event) => {
     const enableLocalStorage = config?.enableLocalStorage === true
     const nodes = Array.isArray(config?.nodes) ? config.nodes : []
     const enabledNodes = listEnabledPicmiNodes(nodes)
-    const thumbnailProcessing = String(config?.thumbnailProcessing ?? 'node').trim() === 'backend' ? 'backend' : 'node'
+    const hasNonPicmiNode = nodes.some((n: any) => n && n.enabled !== false && String(n?.type ?? 'picmi-node') !== 'picmi-node')
+    const effectiveNodeThumbMode = hasNonPicmiNode ? 'backend' : 'node'
     const defaultMaxBytes = Math.max(64 * 1024, Math.min(10 * 1024 * 1024, Math.floor(Number(config?.thumbnailMaxBytes ?? 1 * 1024 * 1024) || 1 * 1024 * 1024)))
     const defaultMaxWidth = Math.max(1024, Math.min(2048, Math.floor(Number(config?.thumbnailMaxWidth ?? 1600) || 1600)))
     const thumbSkipBelowBytes = Math.max(0, Math.min(50 * 1024 * 1024, Math.floor(Number(config?.thumbnailSkipBelowBytes ?? 0) || 0)))
@@ -120,12 +146,14 @@ export default defineEventHandler(async (event) => {
 
     if (!enableLocalStorage && enabledNodes.length > 0) {
       let sawReachable = false
+      const reachable = [] as Array<{ node: any; base: string; nodePath: string }>
       for (const node of enabledNodes) {
         const base = normalizeHttpBase(node?.address)
         if (!base) continue
         const nodePath = joinNodePath(node?.rootDir || '/', relPath)
+        reachable.push({ node, base, nodePath })
 
-        if (thumbnailProcessing === 'node' && thumbSkipBelowBytes > 0) {
+        if (effectiveNodeThumbMode === 'node' && thumbSkipBelowBytes > 0) {
           const rawUrl = new URL(`/uploads${nodePath}`, base)
           let headRes: Response | null = null
           try {
@@ -149,6 +177,7 @@ export default defineEventHandler(async (event) => {
                 if (lastModified) setHeader(event, 'last-modified', lastModified)
                 const etag = rawRes.headers.get('etag')
                 if (etag) setHeader(event, 'etag', etag)
+                logger.debug({ type: 'thumb', mode: 'node', action: 'return-raw-small', path: relPath, bytes: len, threshold: thumbSkipBelowBytes, node: base })
                 return await readResponseBufferWithLimit(rawRes, 60 * 1024 * 1024)
               }
             }
@@ -159,7 +188,7 @@ export default defineEventHandler(async (event) => {
         url.searchParams.set('path', nodePath)
         url.searchParams.set('maxBytes', String(maxBytes))
         url.searchParams.set('maxWidth', String(maxWidth))
-        if (thumbnailProcessing === 'backend') url.searchParams.set('noGenerate', '1')
+        if (effectiveNodeThumbMode === 'backend') url.searchParams.set('noGenerate', '1')
         let nodeRes: Response | null = null
         try {
           nodeRes = await fetch(url, { redirect: 'error', headers: { ...buildNodeAuthHeaders(node) } })
@@ -168,26 +197,8 @@ export default defineEventHandler(async (event) => {
         }
         sawReachable = true
         if (!nodeRes?.ok) {
-          if (thumbnailProcessing === 'backend' && nodeRes?.status === 404) {
-            const rawUrl = new URL(`/uploads${nodePath}`, base)
-            let rawRes: Response | null = null
-            try {
-              rawRes = await fetch(rawUrl, { redirect: 'error', headers: { ...buildNodeAuthHeaders(node) } })
-            } catch {
-              continue
-            }
-            if (!rawRes?.ok) continue
-            const contentType = rawRes.headers.get('content-type')
-            if (contentType) setHeader(event, 'content-type', contentType)
-            const cacheControl = rawRes.headers.get('cache-control')
-            if (cacheControl) setHeader(event, 'cache-control', cacheControl)
-            const lastModified = rawRes.headers.get('last-modified')
-            if (lastModified) setHeader(event, 'last-modified', lastModified)
-            const etag = rawRes.headers.get('etag')
-            if (etag) setHeader(event, 'etag', etag)
-            return await readResponseBufferWithLimit(rawRes, 60 * 1024 * 1024)
-          }
           if (nodeRes?.status === 404) continue
+          logger.warn({ type: 'thumb', action: 'node-thumb-failed', path: relPath, status: nodeRes?.status ?? 0, node: base })
           continue
         }
         const contentType = nodeRes.headers.get('content-type')
@@ -199,7 +210,60 @@ export default defineEventHandler(async (event) => {
         const etag = nodeRes.headers.get('etag')
         if (etag) setHeader(event, 'etag', etag)
         const buf = await readResponseBufferWithLimit(nodeRes, Math.max(1024 * 1024, maxBytes * 3))
+        logger.debug({ type: 'thumb', action: 'node-thumb-hit', path: relPath, bytes: buf.length, node: base })
         return buf
+      }
+      if (sawReachable && effectiveNodeThumbMode === 'backend') {
+        for (const item of reachable) {
+          const rawUrl = new URL(`/uploads${item.nodePath}`, item.base)
+          let rawRes: Response | null = null
+          try {
+            rawRes = await fetch(rawUrl, { redirect: 'error', headers: { ...buildNodeAuthHeaders(item.node) } })
+          } catch {
+            continue
+          }
+          if (!rawRes?.ok) continue
+          const rawBuf = await readResponseBufferWithLimit(rawRes, 60 * 1024 * 1024)
+          if (thumbSkipBelowBytes > 0 && rawBuf.length <= thumbSkipBelowBytes) {
+            const contentType = rawRes.headers.get('content-type')
+            if (contentType) setHeader(event, 'content-type', contentType)
+            const cacheControl = rawRes.headers.get('cache-control')
+            if (cacheControl) setHeader(event, 'cache-control', cacheControl)
+            const lastModified = rawRes.headers.get('last-modified')
+            if (lastModified) setHeader(event, 'last-modified', lastModified)
+            const etag = rawRes.headers.get('etag')
+            if (etag) setHeader(event, 'etag', etag)
+            logger.debug({ type: 'thumb', mode: 'backend', action: 'return-raw-small', path: relPath, bytes: rawBuf.length, threshold: thumbSkipBelowBytes, node: item.base })
+            return rawBuf
+          }
+          const ext = path.posix.extname(relPath).toLowerCase()
+          if (ext === '.svg') {
+            setHeader(event, 'content-type', 'image/svg+xml')
+            setHeader(event, 'cache-control', 'no-store')
+            logger.debug({ type: 'thumb', mode: 'backend', action: 'return-svg', path: relPath, node: item.base })
+            return rawBuf
+          }
+          const outBuf = await buildThumbBuffer(relPath, rawBuf, maxWidth)
+          setHeader(event, 'content-type', 'image/avif')
+          setHeader(event, 'cache-control', 'no-store')
+          try {
+            const formThumb = new FormData()
+            formThumb.set('thumb', '1')
+            formThumb.set('originPath', item.nodePath)
+            formThumb.set('file', new Blob([new Uint8Array(outBuf)]), `${path.posix.basename(relPath)}.avif`)
+            const thumbUploadUrl = new URL('/api/images/upload', item.base)
+            const uploadRes = await fetch(thumbUploadUrl, { method: 'POST', headers: { ...buildNodeAuthHeaders(item.node) }, body: formThumb, redirect: 'error' })
+            if (!uploadRes.ok) {
+              logger.warn({ type: 'thumb', mode: 'backend', action: 'cache-upload-failed', path: relPath, status: uploadRes.status, node: item.base })
+            } else {
+              logger.debug({ type: 'thumb', mode: 'backend', action: 'cache-uploaded', path: relPath, bytes: outBuf.length, node: item.base })
+            }
+          } catch (error: any) {
+            logger.warn({ type: 'thumb', mode: 'backend', action: 'cache-upload-error', path: relPath, node: item.base, message: String(error?.message ?? error) })
+          }
+          logger.debug({ type: 'thumb', mode: 'backend', action: 'generated-from-raw', path: relPath, bytes: outBuf.length, node: item.base })
+          return outBuf
+        }
       }
       if (sawReachable) {
         setResponseStatus(event, 404)
@@ -217,6 +281,7 @@ export default defineEventHandler(async (event) => {
         if (stat.isFile() && stat.size <= thumbSkipBelowBytes) {
           setHeader(event, 'content-type', mimeByExt(path.posix.extname(relPath).toLowerCase()))
           setHeader(event, 'cache-control', 'no-store')
+          logger.debug({ type: 'thumb', mode: 'local', action: 'return-raw-small', path: relPath, bytes: stat.size, threshold: thumbSkipBelowBytes })
           return await fs.readFile(src)
         }
       }
@@ -231,8 +296,13 @@ export default defineEventHandler(async (event) => {
     if (ext === '.svg') setHeader(event, 'content-type', 'image/svg+xml')
     else setHeader(event, 'content-type', 'image/avif')
     setHeader(event, 'cache-control', 'no-store')
+    logger.debug({ type: 'thumb', mode: 'local', action: 'thumb-ready', path: relPath, file: thumbAbs })
     return await fs.readFile(thumbAbs)
-  } catch {
+  } catch (error: any) {
+    try {
+      const picmi = await usePicmi(event)
+      picmi.logger.error({ type: 'thumb', action: 'handler-error', path: event.node.req.url, message: String(error?.message ?? error) })
+    } catch {}
     setResponseStatus(event, 500)
     return '服务异常'
   }

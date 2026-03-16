@@ -67,8 +67,6 @@ export default defineEventHandler(async (event) => {
     const thumbnailMaxBytes = thumbnailMaxBytesRaw ?? prev?.thumbnailMaxBytes
     const thumbnailMaxWidth = thumbnailMaxWidthRaw ?? prev?.thumbnailMaxWidth
     const thumbnailSkipBelowBytes = thumbnailSkipBelowBytesRaw ?? prev?.thumbnailSkipBelowBytes
-    const hasNonPicmiNode = (nodes as any[]).some((node) => node && node.enabled !== false && String(node?.type ?? 'picmi-node') !== 'picmi-node')
-    if (thumbnailProcessing === 'backend' && hasNonPicmiNode) return fail(event, 400, 40004, '存在非PicMi-Node节点时不可更改缩略图处理位置')
     await picmi.store.saveConfig(listApiStr, nodes, enableLocalStorage, mediaRequireAuth, maxUploadBytesRaw, thumbnailProcessing, thumbnailMaxBytes, thumbnailMaxWidth, thumbnailSkipBelowBytes, nodeReadStrategyRaw)
     return ok(null)
   } catch {

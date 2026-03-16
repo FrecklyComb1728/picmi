@@ -23,7 +23,7 @@
       </n-form-item>
 
       <n-form-item label="缩略图处理位置">
-        <n-select v-model:value="thumbnailProcessing" :options="thumbnailProcessingOptions" class="w-full" :disabled="thumbnailProcessingLocked" />
+        <n-select v-model:value="thumbnailProcessing" :options="thumbnailProcessingOptions" class="w-full" />
       </n-form-item>
 
       <n-form-item label="节点读取算法">
@@ -278,10 +278,6 @@ const nodeReadStrategyOptions = [
   { label: '路径哈希', value: 'path-hash' }
 ]
 
-const thumbnailProcessingLocked = computed(() => {
-  return nodes.value.some((n) => n && n.enabled !== false && n.type !== 'picmi-node')
-})
-
 const nodeStatusById = ref<Record<string, any>>({})
 const statusTimer = ref<number | null>(null)
 
@@ -435,7 +431,6 @@ const saveConfig = async () => {
     const apiMessage = error?.data?.message || error?.response?._data?.message
     const code = error?.data?.code || error?.response?._data?.code
     if (code === 40003) message.error('本地存储与存储节点不可同时启用')
-    else if (code === 40004) message.error('存在非PicMi-Node节点时不可更改缩略图处理位置')
     else message.error(apiMessage || '保存失败')
   } finally {
     saving.value = false
