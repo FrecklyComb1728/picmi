@@ -39,6 +39,43 @@
       </div>
     </n-card>
 
+    <n-card title="URL缓存管理" size="small" :bordered="false" class="rounded-xl shadow-sm">
+       <template #header-extra>
+         <n-button size="small" type="primary" :loading="refreshingCache" @click="refreshAllUrlCache">
+           <template #icon><n-icon :component="RefreshOutline" /></template>
+           刷新全部图片URL缓存
+         </n-button>
+       </template>
+
+       <div v-if="cacheRefreshing" class="flex items-center justify-center py-4">
+         <n-spin size="small" />
+         <span class="ml-2 text-sm text-zinc-500">正在刷新URL缓存...</span>
+       </div>
+
+       <div v-else-if="cacheRefreshResult" class="text-sm text-zinc-600 mb-4">
+         <n-alert type="success" :bordered="false" class="mb-3">
+           刷新完成：成功 {{ cacheRefreshResult.success }} 个文件夹，失败 {{ cacheRefreshResult.fail }} 个
+         </n-alert>
+         <div v-if="cacheRefreshResult.errors && cacheRefreshResult.errors.length" class="space-y-1">
+           <div v-for="(err, i) in cacheRefreshResult.errors" :key="i" class="text-xs text-red-500">{{ err }}</div>
+         </div>
+       </div>
+
+       <div class="text-xs text-zinc-400">操作日志</div>
+       <n-data-table
+         :columns="logColumns"
+         :data="cacheLogs"
+         :loading="loadingLogs"
+         :bordered="false"
+         size="small"
+         class="mt-2"
+         max-height="300"
+       />
+       <div class="flex justify-center mt-3">
+         <n-button size="tiny" secondary :loading="loadingLogs" @click="loadMoreCacheLogs">加载更多</n-button>
+       </div>
+    </n-card>
+
     <n-card title="存储节点" size="small" :bordered="false" class="rounded-xl shadow-sm">
        <template #header-extra>
          <div class="flex items-center gap-2">
@@ -161,7 +198,7 @@
              <n-input v-model:value="editor.address" placeholder="例如: https://dav.example.com" class="w-full" />
            </n-form-item-gi>
            <n-form-item-gi v-if="!isPicmiNode" class="min-w-0" :span="12" label="账号">
-             <n-input v-model:value="editor.username" placeholder="用户名（可选）" class="w-full" />
+             <n-input v-model:value="editor.username" type="text" placeholder="用户名（可选）" class="w-full" />
            </n-form-item-gi>
            <n-form-item-gi class="min-w-0" :span="isPicmiNode ? 24 : 12" label="密码">
              <n-input v-model:value="editor.password" type="password" show-password-on="click" placeholder="密码（可选）" class="w-full" />
@@ -221,7 +258,7 @@
 import { ref, reactive, computed, h, onMounted, onBeforeUnmount, watch } from 'vue'
 import { 
   NCard, NForm, NFormItem, NInput, NButton, NIcon, NBadge, NSwitch, NModal, NSpace, NSelect, useMessage, useDialog,
-  NGrid, NFormItemGi, NInputNumber
+  NGrid, NFormItemGi, NInputNumber, NSpin, NAlert, NDataTable
 } from 'naive-ui'
 import { 
   AddOutline, 
@@ -230,7 +267,8 @@ import {
   GlobeOutline, 
   SyncOutline,
   CreateOutline, 
-  TrashOutline 
+  TrashOutline,
+  RefreshOutline
 } from '@vicons/ionicons5'
 
 const message = useMessage()
@@ -558,4 +596,75 @@ const runSync = async () => {
     syncing.value = false
   }
 }
+
+const refreshingCache = ref(false)
+const cacheRefreshing = ref(false)
+const cacheRefreshResult = ref<{ success: number; fail: number; errors: string[] } | null>(null)
+
+const refreshAllUrlCache = async () => {
+  refreshingCache.value = true
+  cacheRefreshing.value = true
+  cacheRefreshResult.value = null
+  try {
+    const res = await apiFetch<{ success: number; fail: number; errors: string[] }>('/images/url-cache-refresh', {
+      method: 'POST',
+      body: {}
+    })
+    cacheRefreshResult.value = res
+    message.success(`刷新完成：成功 ${res.success} 个文件夹，失败 ${res.fail} 个`)
+  } catch (error: any) {
+    const apiMessage = error?.data?.message || error?.response?._data?.message
+    message.error(apiMessage || '刷新失败')
+  } finally {
+    refreshingCache.value = false
+    cacheRefreshing.value = false
+  }
+}
+
+const cacheLogs = ref<any[]>([])
+const loadingLogs = ref(false)
+const logsOffset = ref(0)
+
+const logColumns = [
+  { title: '时间', key: 'createdAt', width: 160, render: (row: any) => row.createdAt ? new Date(row.createdAt).toLocaleString() : '-' },
+  { title: '操作人', key: 'operator', width: 100 },
+  { title: '操作', key: 'action', width: 80, render: (row: any) => {
+    const map: Record<string, string> = { refresh: '刷新', add: '新增', delete: '删除' }
+    return map[row.action] ?? row.action
+  }},
+  { title: '节点', key: 'nodeId', width: 200, ellipsis: { tooltip: true } },
+  { title: '文件夹', key: 'folderPath', width: 160, ellipsis: { tooltip: true } },
+  { title: '详情', key: 'detail', ellipsis: { tooltip: true } }
+]
+
+const loadCacheLogs = async (reset = true) => {
+  if (loadingLogs.value) return
+  loadingLogs.value = true
+  if (reset) {
+    logsOffset.value = 0
+    cacheLogs.value = []
+  }
+  try {
+    const res = await apiFetch<{ items: any[] }>('/images/url-cache-logs', {
+      method: 'GET',
+      query: { limit: 50, offset: logsOffset.value }
+    })
+    if (reset) {
+      cacheLogs.value = res.items
+    } else {
+      cacheLogs.value = [...cacheLogs.value, ...res.items]
+    }
+    logsOffset.value += res.items.length
+  } catch {
+    message.error('加载日志失败')
+  } finally {
+    loadingLogs.value = false
+  }
+}
+
+const loadMoreCacheLogs = () => {
+  loadCacheLogs(false)
+}
+
+loadCacheLogs()
 </script>

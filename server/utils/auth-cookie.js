@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 
-let key = crypto.createHash('sha256').update(crypto.randomBytes(32)).digest()
+let key = crypto.createHash('sha256').update('picmi-dev-default-secret').digest()
 let authMaxAgeMs = 7 * 24 * 60 * 60 * 1000
 
 export const setAuthCookieConfig = (config) => {
@@ -11,7 +11,8 @@ export const setAuthCookieConfig = (config) => {
 
   if (!secret) {
     if (process.env.NODE_ENV === 'production') throw new Error('auth.cookieSecret 未配置')
-    key = crypto.createHash('sha256').update(crypto.randomBytes(32)).digest()
+    key = crypto.createHash('sha256').update('picmi-dev-default-secret').digest()
+    console.warn('[picmi] auth.cookieSecret 未配置，使用默认密钥（仅用于开发环境）')
     return
   }
 

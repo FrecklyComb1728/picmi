@@ -282,6 +282,76 @@ const createSqlStore = (db, dialect) => {
     await saveNodes(nodes)
   }
 
+  const getImageUrlCache = async (nodeId, folderPath) => {
+    const rows = await db.all(
+      'SELECT id, node_id, folder_path, url, file_name, file_size, uploaded_at, updated_at FROM image_url_caches WHERE node_id = ? AND folder_path = ?',
+      [nodeId, folderPath]
+    )
+    return rows.map((row) => ({
+      id: row.id,
+      nodeId: row.node_id,
+      folderPath: row.folder_path,
+      url: row.url,
+      fileName: row.file_name,
+      fileSize: row.file_size,
+      uploadedAt: row.uploaded_at,
+      updatedAt: row.updated_at
+    }))
+  }
+
+  const setImageUrlCache = async (nodeId, folderPath, urls) => {
+    await db.run('DELETE FROM image_url_caches WHERE node_id = ? AND folder_path = ?', [nodeId, folderPath])
+    const now = new Date().toISOString()
+    for (const entry of urls) {
+      await db.run(
+        'INSERT INTO image_url_caches (node_id, folder_path, url, file_name, file_size, uploaded_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [nodeId, folderPath, entry.url, entry.fileName ?? null, entry.fileSize ?? null, entry.uploadedAt ?? null, now]
+      )
+    }
+  }
+
+  const addImageUrlCache = async (nodeId, folderPath, urlEntry) => {
+    const now = new Date().toISOString()
+    const upsertSql = () => {
+      if (dialect === 'mysql') return 'INSERT INTO image_url_caches (node_id, folder_path, url, file_name, file_size, uploaded_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE file_name = VALUES(file_name), file_size = VALUES(file_size), uploaded_at = VALUES(uploaded_at), updated_at = VALUES(updated_at)'
+      if (dialect === 'postgresql') return 'INSERT INTO image_url_caches (node_id, folder_path, url, file_name, file_size, uploaded_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (node_id, folder_path, url) DO UPDATE SET file_name = EXCLUDED.file_name, file_size = EXCLUDED.file_size, uploaded_at = EXCLUDED.uploaded_at, updated_at = EXCLUDED.updated_at'
+      return 'INSERT OR REPLACE INTO image_url_caches (node_id, folder_path, url, file_name, file_size, uploaded_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    }
+    await db.run(upsertSql(), [nodeId, folderPath, urlEntry.url, urlEntry.fileName ?? null, urlEntry.fileSize ?? null, urlEntry.uploadedAt ?? null, now])
+  }
+
+  const deleteImageUrlCache = async (nodeId, folderPath, url) => {
+    await db.run('DELETE FROM image_url_caches WHERE node_id = ? AND folder_path = ? AND url = ?', [nodeId, folderPath, url])
+  }
+
+  const deleteImageUrlCacheByFolder = async (nodeId, folderPath) => {
+    await db.run('DELETE FROM image_url_caches WHERE node_id = ? AND folder_path = ?', [nodeId, folderPath])
+  }
+
+  const writeCacheLog = async (operator, action, nodeId, folderPath, detail) => {
+    const now = new Date().toISOString()
+    await db.run(
+      'INSERT INTO url_cache_logs (operator, action, node_id, folder_path, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [operator, action, nodeId ?? null, folderPath ?? null, detail ?? null, now]
+    )
+  }
+
+  const getCacheLogs = async (limit = 50, offset = 0) => {
+    const rows = await db.all(
+      'SELECT id, operator, action, node_id, folder_path, detail, created_at FROM url_cache_logs ORDER BY id DESC LIMIT ? OFFSET ?',
+      [limit, offset]
+    )
+    return rows.map((row) => ({
+      id: row.id,
+      operator: row.operator,
+      action: row.action,
+      nodeId: row.node_id,
+      folderPath: row.folder_path,
+      detail: row.detail,
+      createdAt: row.created_at
+    }))
+  }
+
   return {
     getAdminUsername,
     setAdminUsername,
@@ -293,6 +363,13 @@ const createSqlStore = (db, dialect) => {
     saveConfig,
     getPublicPaths,
     setPublicPath,
+    getImageUrlCache,
+    setImageUrlCache,
+    addImageUrlCache,
+    deleteImageUrlCache,
+    deleteImageUrlCacheByFolder,
+    writeCacheLog,
+    getCacheLogs,
     close: async () => db.close()
   }
 }
@@ -468,6 +545,112 @@ const createSupabaseStore = (sb) => {
     else await sb.del('public_paths', { path })
   }
 
+  const getImageUrlCache = async (nodeId, folderPath) => {
+    const rows = await sb.all('image_url_caches', '*')
+    return rows
+      .filter((row) => row.node_id === nodeId && row.folder_path === folderPath)
+      .map((row) => ({
+        id: row.id,
+        nodeId: row.node_id,
+        folderPath: row.folder_path,
+        url: row.url,
+        fileName: row.file_name,
+        fileSize: row.file_size,
+        uploadedAt: row.uploaded_at,
+        updatedAt: row.updated_at
+      }))
+  }
+
+  const setImageUrlCache = async (nodeId, folderPath, urls) => {
+    const existing = await sb.all('image_url_caches', '*')
+    const toDelete = existing
+      .filter((row) => row.node_id === nodeId && row.folder_path === folderPath)
+      .map((row) => row.id)
+    for (const id of toDelete) {
+      await sb.del('image_url_caches', { id })
+    }
+    const now = new Date().toISOString()
+    for (const entry of urls) {
+      await sb.upsert('image_url_caches', {
+        node_id: nodeId,
+        folder_path: folderPath,
+        url: entry.url,
+        file_name: entry.fileName ?? null,
+        file_size: entry.fileSize ?? null,
+        uploaded_at: entry.uploadedAt ?? null,
+        updated_at: now
+      })
+    }
+  }
+
+  const addImageUrlCache = async (nodeId, folderPath, urlEntry) => {
+    const now = new Date().toISOString()
+    const existing = await sb.all('image_url_caches', '*')
+    const found = existing.find(
+      (row) => row.node_id === nodeId && row.folder_path === folderPath && row.url === urlEntry.url
+    )
+    if (found) {
+      await sb.del('image_url_caches', { id: found.id })
+    }
+    await sb.upsert('image_url_caches', {
+      node_id: nodeId,
+      folder_path: folderPath,
+      url: urlEntry.url,
+      file_name: urlEntry.fileName ?? null,
+      file_size: urlEntry.fileSize ?? null,
+      uploaded_at: urlEntry.uploadedAt ?? null,
+      updated_at: now
+    })
+  }
+
+  const deleteImageUrlCache = async (nodeId, folderPath, url) => {
+    const existing = await sb.all('image_url_caches', '*')
+    const toDelete = existing.filter(
+      (row) => row.node_id === nodeId && row.folder_path === folderPath && row.url === url
+    )
+    for (const row of toDelete) {
+      await sb.del('image_url_caches', { id: row.id })
+    }
+  }
+
+  const deleteImageUrlCacheByFolder = async (nodeId, folderPath) => {
+    const existing = await sb.all('image_url_caches', '*')
+    const toDelete = existing.filter(
+      (row) => row.node_id === nodeId && row.folder_path === folderPath
+    )
+    for (const row of toDelete) {
+      await sb.del('image_url_caches', { id: row.id })
+    }
+  }
+
+  const writeCacheLog = async (operator, action, nodeId, folderPath, detail) => {
+    const now = new Date().toISOString()
+    await sb.upsert('url_cache_logs', {
+      operator,
+      action,
+      node_id: nodeId ?? null,
+      folder_path: folderPath ?? null,
+      detail: detail ?? null,
+      created_at: now
+    })
+  }
+
+  const getCacheLogs = async (limit = 50, offset = 0) => {
+    const rows = await sb.all('url_cache_logs', '*')
+    return rows
+      .sort((a, b) => Number(b.id) - Number(a.id))
+      .slice(offset, offset + limit)
+      .map((row) => ({
+        id: row.id,
+        operator: row.operator,
+        action: row.action,
+        nodeId: row.node_id,
+        folderPath: row.folder_path,
+        detail: row.detail,
+        createdAt: row.created_at
+      }))
+  }
+
   return {
     getAdminUsername,
     setAdminUsername,
@@ -479,6 +662,13 @@ const createSupabaseStore = (sb) => {
     saveConfig,
     getPublicPaths,
     setPublicPath,
+    getImageUrlCache,
+    setImageUrlCache,
+    addImageUrlCache,
+    deleteImageUrlCache,
+    deleteImageUrlCacheByFolder,
+    writeCacheLog,
+    getCacheLogs,
     close: async () => sb.close()
   }
 }

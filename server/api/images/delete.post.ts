@@ -1,8 +1,9 @@
 import path from 'node:path'
 import { rootDir } from '../../config.js'
 import { removeRecursive } from '../../utils/images-fs'
-import { resolvePath } from '../../utils/paths.js'
-import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, listEnabledPicmiNodes, normalizeHttpBase, ok, readBodySafe, requireAuth, usePicmi } from '../../utils/nitro'
+import { normalizePath, resolvePath } from '../../utils/paths.js'
+import { buildNodeAuthHeaders, fail, fetchNodePayload, getAuthUsername, joinNodePath, listEnabledPicmiNodes, normalizeHttpBase, ok, readBodySafe, requireAuth, usePicmi } from '../../utils/nitro'
+import { clearRecentCache } from './recent.get'
 
 export default defineEventHandler(async (event) => {
   const auth = await requireAuth(event)
@@ -21,6 +22,7 @@ export default defineEventHandler(async (event) => {
     const enabledNodes = listEnabledPicmiNodes(nodes)
     if (!enableLocalStorage && enabledNodes.length > 0) {
       let firstPayload: any = null
+      const operator = getAuthUsername(event) ?? 'unknown'
       for (const node of enabledNodes) {
         const base = normalizeHttpBase(node?.address)
         if (!base) return fail(event, 400, 40002, '节点地址无效')
@@ -36,6 +38,14 @@ export default defineEventHandler(async (event) => {
         if (!payload || typeof payload !== 'object') return fail(event, 502, 50201, '节点响应异常')
         if (!res.ok) return fail(event, res.status, Number((payload as any).code) || 1, String((payload as any).message || `http ${res.status}`))
         if (!firstPayload) firstPayload = payload
+
+        const nodeId = String(node?.id ?? '')
+        for (const p of paths) {
+          const folderPath = normalizePath(path.posix.dirname(p) || '/')
+          const relativeUrl = p
+          picmi.store.deleteImageUrlCache(nodeId, folderPath, relativeUrl).catch(() => {})
+          picmi.store.writeCacheLog(operator, 'delete', nodeId, folderPath, JSON.stringify({ url: relativeUrl })).catch(() => {})
+        }
       }
       return firstPayload ?? ok(null)
     }
@@ -45,6 +55,7 @@ export default defineEventHandler(async (event) => {
       const { target } = resolvePath(root, p)
       await removeRecursive(target)
     }
+    clearRecentCache()
     return ok(null)
   } catch {
     return fail(event, 500, 1, '服务异常')

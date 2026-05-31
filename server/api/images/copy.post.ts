@@ -3,6 +3,7 @@ import { rootDir } from '../../config.js'
 import { copyRecursive } from '../../utils/images-fs'
 import { normalizePath, resolvePath } from '../../utils/paths.js'
 import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, listEnabledPicmiNodes, normalizeHttpBase, ok, readBodySafe, requireAuth, usePicmi } from '../../utils/nitro'
+import { clearRecentCache } from './recent.get'
 
 type CopyItem = { path: string }
 
@@ -53,6 +54,7 @@ export default defineEventHandler(async (event) => {
       await copyRecursive(from, target)
     }
 
+    clearRecentCache()
     return ok(null)
   } catch {
     return fail(event, 500, 1, '服务异常')

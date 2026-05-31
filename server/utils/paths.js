@@ -82,7 +82,15 @@ const sniffImageMime = (buf) => {
 }
 
 const validateImageUpload = (name, buf) => {
-  return { ok: true, message: null, mime: null }
+  const ext = path.extname(String(name ?? '')).toLowerCase()
+  if (!imageExt.has(ext)) {
+    return { ok: false, message: '文件扩展名不支持', mime: null }
+  }
+  const mime = sniffImageMime(buf)
+  if (!mime) {
+    return { ok: false, message: '文件内容无法识别为图片', mime: null }
+  }
+  return { ok: true, message: null, mime }
 }
 
 const normalizeUploadFileName = (value) => {

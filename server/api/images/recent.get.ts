@@ -4,20 +4,10 @@ import { getQuery } from 'h3'
 import { rootDir } from '../../config.js'
 import { isImageFileName, normalizePath } from '../../utils/paths.js'
 import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, listEnabledPicmiNodes, normalizeHttpBase, ok, requireAuth, toRelativePath, usePicmi } from '../../utils/nitro'
+import { buildRawUrl, buildThumbUrl } from '../../utils/images-url'
 
 let cache: { key: string; limit: number; ts: number; data: any } | null = null
 const cacheTtlMs = 10_000
-
-const encodePathForRaw = (relPath: string) => {
-  return String(relPath)
-    .replace(/^\/+/, '')
-    .split('/')
-    .filter(Boolean)
-    .map(encodeURIComponent)
-    .join('/')
-}
-const buildRawUrl = (relPath: string) => `/raw/${encodePathForRaw(relPath)}`
-const buildThumbUrl = (relPath: string) => `/thumb/${encodePathForRaw(relPath)}`
 
 const pushTop = (arr: any[], item: any, limit: number) => {
   arr.push(item)
@@ -54,7 +44,6 @@ const scanLocalRecent = async (root: string, limit: number) => {
       if (scannedFiles > maxFiles) break
       try {
         const info = await fs.stat(full)
-        const relDir = current.rel.replace(/^\/+/, '')
         const type = isImageFileName(entry.name) ? 'image' : 'file'
         const relPath = normalizePath(path.posix.join(current.rel, entry.name))
         pushTop(top, {
@@ -186,3 +175,5 @@ export default defineEventHandler(async (event) => {
     return fail(event, 500, 1, '服务异常')
   }
 })
+
+export const clearRecentCache = () => { cache = null }

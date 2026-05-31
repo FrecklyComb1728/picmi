@@ -16,10 +16,6 @@ const normalizeHttpBase = (address) => {
     const url = new URL(withScheme)
     if (url.username || url.password) return null
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
-    if (process.env.NODE_ENV === 'production') {
-      const host = url.hostname.toLowerCase()
-      if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') return null
-    }
     return url.origin
   } catch {
     return null

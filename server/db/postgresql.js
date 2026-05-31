@@ -37,6 +37,8 @@ const initPostgresql = async (config) => {
     await run('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
     await run('CREATE TABLE IF NOT EXISTS nodes (id TEXT PRIMARY KEY, name TEXT, type TEXT, address TEXT, username TEXT, password TEXT, enabled BOOLEAN, root_dir TEXT)')
     await run('CREATE TABLE IF NOT EXISTS public_paths (path TEXT PRIMARY KEY)')
+    await run('CREATE TABLE IF NOT EXISTS image_url_caches (id SERIAL PRIMARY KEY, node_id TEXT NOT NULL, folder_path TEXT NOT NULL, url TEXT NOT NULL, file_name TEXT, file_size BIGINT, uploaded_at TEXT, updated_at TEXT NOT NULL, UNIQUE(node_id, folder_path, url))')
+    await run('CREATE TABLE IF NOT EXISTS url_cache_logs (id SERIAL PRIMARY KEY, operator TEXT NOT NULL, action TEXT NOT NULL, node_id TEXT, folder_path TEXT, detail TEXT, created_at TEXT NOT NULL)')
     const columns = await all("SELECT column_name FROM information_schema.columns WHERE table_name = 'nodes' AND column_name = 'type'")
     if (columns.length === 0) {
       await run('ALTER TABLE nodes ADD COLUMN type TEXT')

@@ -5,8 +5,9 @@ import { getHeader, readMultipartFormData } from 'h3'
 import { rootDir } from '../../config.js'
 import { ensureDir, normalizeMaxUploadBytes, sanitizeSingleName } from '../../utils/images-fs'
 import { isImageFileName, normalizePath, normalizeUploadFileName, resolvePath, validateImageUpload } from '../../utils/paths.js'
-import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, listEnabledPicmiNodes, normalizeHttpBase, ok, requireAuth, usePicmi } from '../../utils/nitro'
+import { buildNodeAuthHeaders, fail, fetchNodePayload, getAuthUsername, joinNodePath, listEnabledPicmiNodes, normalizeHttpBase, ok, requireAuth, usePicmi } from '../../utils/nitro'
 import sharp from 'sharp'
+import { clearRecentCache } from './recent.get'
 
 const formatNumber = (n: number, digits = 1) => {
   const s = n.toFixed(digits)
@@ -118,6 +119,7 @@ export default defineEventHandler(async (event) => {
         const { buf: outBuf } = await buildThumbBuffer(safeName, buf)
         await fs.writeFile(thumbTarget, outBuf)
       }
+      clearRecentCache()
       return ok(null)
     }
 
@@ -138,6 +140,9 @@ export default defineEventHandler(async (event) => {
       if (!res.ok) return fail(event, res.status, Number((payload as any).code) || 1, String((payload as any).message || `http ${res.status}`))
       if (!firstPayload) firstPayload = payload
 
+      picmi.store.deleteImageUrlCacheByFolder(String(node?.id ?? ''), currentPath).catch(() => {})
+      picmi.store.writeCacheLog(getAuthUsername(event) ?? 'unknown', 'upload', String(node?.id ?? ''), currentPath, JSON.stringify({ file: safeName })).catch(() => {})
+
       if (thumbnailProcessing === 'backend' && isImageFileName(safeName)) {
         if (thumbSkipBelowBytes > 0 && buf.length <= thumbSkipBelowBytes) continue
         const nodeOriginalPath = joinNodePath(node?.rootDir || '/', normalizePath(path.posix.join(currentPath, safeName)))
@@ -153,6 +158,7 @@ export default defineEventHandler(async (event) => {
         if (!resThumb.ok) return fail(event, resThumb.status, Number((payloadThumb as any).code) || 1, String((payloadThumb as any).message || `http ${resThumb.status}`))
       }
     }
+    clearRecentCache()
     return firstPayload ?? ok(null)
   } catch {
     return fail(event, 500, 1, '服务异常')

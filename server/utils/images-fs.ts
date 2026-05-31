@@ -62,12 +62,5 @@ export const copyRecursive = async (from: string, to: string) => {
 
 export const removeRecursive = async (target: string) => {
   if (!fsSync.existsSync(target)) return
-  const stat = await fs.stat(target)
-  if (stat.isDirectory()) {
-    const items = await fs.readdir(target)
-    for (const item of items) await removeRecursive(path.join(target, item))
-    await fs.rmdir(target)
-    return
-  }
-  await fs.unlink(target)
+  await fs.rm(target, { recursive: true })
 }

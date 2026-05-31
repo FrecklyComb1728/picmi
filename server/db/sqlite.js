@@ -53,6 +53,9 @@ const initSqlite = async (file) => {
     await run('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
     await run('CREATE TABLE IF NOT EXISTS nodes (id TEXT PRIMARY KEY, name TEXT, type TEXT, address TEXT, username TEXT, password TEXT, enabled INTEGER, root_dir TEXT)')
     await run('CREATE TABLE IF NOT EXISTS public_paths (path TEXT PRIMARY KEY)')
+    await run('CREATE TABLE IF NOT EXISTS image_url_caches (id INTEGER PRIMARY KEY AUTOINCREMENT, node_id TEXT NOT NULL, folder_path TEXT NOT NULL, url TEXT NOT NULL, file_name TEXT, file_size INTEGER, uploaded_at TEXT, updated_at TEXT NOT NULL, UNIQUE(node_id, folder_path, url))')
+    await run('CREATE INDEX IF NOT EXISTS idx_url_cache_node_folder ON image_url_caches (node_id, folder_path)')
+    await run('CREATE TABLE IF NOT EXISTS url_cache_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, operator TEXT NOT NULL, action TEXT NOT NULL, node_id TEXT, folder_path TEXT, detail TEXT, created_at TEXT NOT NULL)')
     const columns = await all('PRAGMA table_info(nodes)')
     if (!columns.some((row) => row.name === 'type')) {
       await run('ALTER TABLE nodes ADD COLUMN type TEXT')

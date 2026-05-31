@@ -37,6 +37,10 @@
           <template #icon><n-icon :component="ShareSocialOutline" /></template>
           {{ publicEnabled ? '已公开' : '设为公开' }}
         </n-button>
+        <n-button size="small" :loading="refreshingUrlCache" @click="handleRefreshUrlCache">
+          <template #icon><n-icon :component="RefreshOutline" /></template>
+          刷新URL列表
+        </n-button>
       </div>
     </div>
 
@@ -250,10 +254,23 @@ import {
   NPopselect, NSkeleton, NEmpty, NPagination, NModal, NSelect, NDropdown, useMessage, useDialog 
 } from 'naive-ui'
 import {
-  ImagesOutline, SearchOutline, FilterOutline, CloudUploadOutline, FolderOpenOutline, CloseOutline, ShareSocialOutline, CopyOutline, OpenOutline, InformationCircleOutline
+  ImagesOutline, SearchOutline, FilterOutline, CloudUploadOutline, FolderOpenOutline, CloseOutline, ShareSocialOutline, CopyOutline, OpenOutline, InformationCircleOutline, RefreshOutline
 } from '@vicons/ionicons5'
 import type { ClipboardItem } from '~/composables/useImageClipboard'
 import type { ImageEntry, ImagesListResponse } from '~/types/images'
+
+const refreshingUrlCache = ref(false)
+const handleRefreshUrlCache = async () => {
+  refreshingUrlCache.value = true
+  try {
+    await apiFetch('/images/refresh-url-cache', { method: 'POST', body: { path: currentPath.value } })
+    message.success('URL列表已刷新')
+  } catch {
+    message.error('刷新URL列表失败')
+  } finally {
+    refreshingUrlCache.value = false
+  }
+}
 
 definePageMeta({
   path: '/images/:filePath(.*)*'

@@ -123,10 +123,6 @@ export const normalizeHttpBase = (address: any) => {
     const url = new URL(withScheme)
     if (url.username || url.password) return null
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
-    if (process.env.NODE_ENV === 'production') {
-      const host = url.hostname.toLowerCase()
-      if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') return null
-    }
     return url.origin
   } catch {
     return null
@@ -201,7 +197,19 @@ export const readResponseBufferWithLimit = async (res: Response, maxBytes: numbe
   return Buffer.concat(chunks, total)
 }
 
-let rrCursor = 0
+const createRoundRobinCursor = () => {
+  let cursor = 0
+  return {
+    next: (length: number) => {
+      const start = cursor % length
+      cursor = (cursor + 1) % 2147483647
+      return start
+    },
+    reset: () => { cursor = 0 }
+  }
+}
+const rrCursor = createRoundRobinCursor()
+export const resetRoundRobinCursor = () => rrCursor.reset()
 
 const normalizeReadStrategy = (value: any) => {
   const mode = String(value ?? '').trim()
@@ -243,8 +251,7 @@ export const orderEnabledPicmiNodes = (nodes: any[], strategy?: any, key?: any) 
     const raw = String(key ?? '')
     start = raw ? hashString(raw) % enabled.length : 0
   } else {
-    start = rrCursor % enabled.length
-    rrCursor = (rrCursor + 1) % 2147483647
+    start = rrCursor.next(enabled.length)
   }
   return enabled.map((_, index) => enabled[(start + index) % enabled.length])
 }

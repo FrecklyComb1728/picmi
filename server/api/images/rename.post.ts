@@ -4,6 +4,7 @@ import { rootDir } from '../../config.js'
 import { sanitizeSingleName } from '../../utils/images-fs'
 import { normalizePath, resolvePath } from '../../utils/paths.js'
 import { buildNodeAuthHeaders, fail, fetchNodePayload, joinNodePath, listEnabledPicmiNodes, normalizeHttpBase, ok, readBodySafe, requireAuth, usePicmi } from '../../utils/nitro'
+import { clearRecentCache } from './recent.get'
 
 export default defineEventHandler(async (event) => {
   const auth = await requireAuth(event)
@@ -46,6 +47,7 @@ export default defineEventHandler(async (event) => {
     const nextNormalized = path.posix.join(path.posix.dirname(normalized), safeName)
     const next = resolvePath(root, nextNormalized).target
     await fs.rename(target, next)
+    clearRecentCache()
     return ok(null)
   } catch {
     return fail(event, 500, 1, '服务异常')
