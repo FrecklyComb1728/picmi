@@ -37,10 +37,10 @@ if [ ! -d "node_modules" ] || git diff "$PREV_COMMIT" HEAD --name-only | grep -q
 fi
 log "开始构建..."
 BUILD_ERR=$(pnpm build 2>&1) || { log_stderr "pnpm build 失败"; echo "$BUILD_ERR" >> "$LOG_FILE"; exit 1; }
-RELOAD_ERR=$(pm2 reload ecosystem.config.js --update-env 2>&1) || {
+RELOAD_ERR=$(pm2 reload ecosystem.config.cjs --update-env 2>&1) || {
   log "pm2 reload 失败，尝试 pm2 start..."
   echo "$RELOAD_ERR" >> "$LOG_FILE"
-  START_ERR=$(pm2 start ecosystem.config.js 2>&1) || { log_stderr "pm2 start 失败"; echo "$START_ERR" >> "$LOG_FILE"; exit 1; }
+  START_ERR=$(pm2 start ecosystem.config.cjs 2>&1) || { log_stderr "pm2 start 失败"; echo "$START_ERR" >> "$LOG_FILE"; exit 1; }
 }
 pm2 save >> "$LOG_FILE" 2>&1
 log "部署完成: $PREV_COMMIT -> $NEW_COMMIT"

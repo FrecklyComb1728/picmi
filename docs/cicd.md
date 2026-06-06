@@ -6,7 +6,7 @@
 
 | 文件 | 说明 |
 |------|------|
-| `ecosystem.config.js` | PM2 配置（fork 模式、512M 内存上限） |
+| `ecosystem.config.cjs` | PM2 配置（fork 模式、512M 内存上限） |
 | `deploy.sh` | 部署脚本（拉取代码、按需安装依赖、构建、reload） |
 | `webhook.example.json` | webhook 配置模板（需改名为 `webhook.json`） |
 
@@ -33,7 +33,7 @@ cd picmi
 
 pnpm install --frozen-lockfile --registry=https://registry.npmmirror.com
 pnpm build
-pm2 start ecosystem.config.js
+pm2 start ecosystem.config.cjs
 pm2 save
 pm2 startup
 ```

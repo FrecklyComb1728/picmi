@@ -10,6 +10,6 @@ logs
 data/sqlite.db
 /uploads
 /public/uploads
-ecosystem.config.js
+ecosystem.config.cjs
 webhook.json
 config.json
