@@ -87,6 +87,7 @@ WorkingDirectory=/opt/picmi
 ExecStart=/usr/local/bin/webhook \
   -hooks /opt/picmi/webhook.json \
   -port 9000 \
+  -urlprefix ""
 Restart=always
 NoNewPrivileges=yes
 PrivateTmp=yes
