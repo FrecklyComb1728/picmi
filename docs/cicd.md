@@ -96,6 +96,11 @@ PrivateTmp=yes
 WantedBy=multi-user.target
 ```
 
+如果需要更改 URL 前缀（如 `/webhook`），请在 `ExecStart` 中添加 `-urlprefix "/webhook"`。
+```ini
+  -urlprefix "/webhook"
+```
+
 启用：
 ```bash
 sudo systemctl daemon-reload
