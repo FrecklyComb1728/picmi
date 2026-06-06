@@ -31,12 +31,12 @@ GIT_FETCH_ERR=$(git fetch origin main 2>&1) || { log_stderr "git fetch 失败: $
 GIT_RESET_ERR=$(git reset --hard origin/main 2>&1) || { log_stderr "git reset 失败: $GIT_RESET_ERR"; exit 1; }
 NEW_COMMIT=$(git rev-parse --short HEAD)
 log "新版本: $NEW_COMMIT"
-if [ ! -d "node_modules" ] || git diff "$PREV_COMMIT" HEAD --name-only | grep -qE "package\.json|pnpm-lock\.yaml"; then
+if [ ! -d "node_modules" ] || git diff "$PREV_COMMIT" HEAD --name-only | grep -qE "package\.json|package-lock\.json"; then
   log "依赖有变动或首次安装，开始安装..."
-  INSTALL_ERR=$(pnpm install --frozen-lockfile --registry=https://registry.npmmirror.com 2>&1) || { log_stderr "pnpm install 失败"; echo "$INSTALL_ERR" >> "$LOG_FILE"; exit 1; }
+  INSTALL_ERR=$(npm install --registry=https://registry.npmmirror.com 2>&1) || { log_stderr "npm install 失败"; echo "$INSTALL_ERR" >> "$LOG_FILE"; exit 1; }
 fi
 log "开始构建..."
-BUILD_ERR=$(pnpm build 2>&1) || { log_stderr "pnpm build 失败"; echo "$BUILD_ERR" >> "$LOG_FILE"; exit 1; }
+BUILD_ERR=$(npm run build 2>&1) || { log_stderr "npm build 失败"; echo "$BUILD_ERR" >> "$LOG_FILE"; exit 1; }
 RELOAD_ERR=$(pm2 reload ecosystem.config.cjs --update-env 2>&1) || {
   log "pm2 reload 失败，尝试 pm2 start..."
   echo "$RELOAD_ERR" >> "$LOG_FILE"
