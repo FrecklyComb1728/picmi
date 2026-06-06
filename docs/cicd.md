@@ -83,7 +83,7 @@ After=network.target
 Type=simple
 User=root
 Group=root
-WorkingDirectory=/opt/picmi-node
+WorkingDirectory=/opt/picmi
 ExecStart=/usr/local/bin/webhook \
   -hooks /opt/picmi/webhook.json \
   -port 9000 \
@@ -106,8 +106,7 @@ sudo systemctl status webhook-picmi
 ### 6. 开放端口
 
 ```bash
-sudo ufw allow 9001/tcp
-sudo ufw allow from 140.82.112.0/20 to any port 9001 proto tcp
+sudo ufw allow 9000/tcp
 ```
 
 ### 7. GitHub Webhook
