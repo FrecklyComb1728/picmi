@@ -12,3 +12,4 @@ data/sqlite.db
 /public/uploads
 ecosystem.config.js
 webhook.json
+config.json

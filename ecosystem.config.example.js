@@ -9,6 +9,6 @@ module.exports = {
     listen_timeout: 10000,
     kill_timeout: 5000,
     autorestart: true,
-    env: { NODE_ENV: 'production', PORT: 3000 }
+    env: { NODE_ENV: 'production', PORT: 5408 }
   }]
 };

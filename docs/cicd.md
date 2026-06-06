@@ -53,7 +53,7 @@ pm2 startup
 
 设置权限：
 ```bash
-chmod +x /www/wwwroot/picmi/deploy.sh
+chmod +x /opt/picmi/deploy.sh
 ```
 
 ### 4. Webhook 配置
@@ -83,14 +83,13 @@ After=network.target
 Type=simple
 User=root
 Group=root
-WorkingDirectory=/www/wwwroot/picmi
-ExecStart=/usr/local/bin/webhook -hooks /www/wwwroot/picmi/webhook.json -port 9001
+WorkingDirectory=/opt/picmi-node
+ExecStart=/usr/local/bin/webhook \
+  -hooks /opt/picmi/webhook.json \
+  -port 9000 \
 Restart=always
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectSystem=strict
-ProtectHome=yes
-ReadWritePaths=/
 
 [Install]
 WantedBy=multi-user.target
@@ -117,7 +116,7 @@ sudo ufw allow from 140.82.112.0/20 to any port 9001 proto tcp
 
 | 字段 | 值 |
 |------|-----|
-| Payload URL | `http://服务器IP:9001/hooks/deploy` |
+| Payload URL | `http://服务器IP:9000/hooks/deploy` |
 | Content type | `application/json` |
 | Secret | 与 `webhook.json` 一致 |
 | Events | Just the `push` event |
@@ -127,7 +126,7 @@ sudo ufw allow from 140.82.112.0/20 to any port 9001 proto tcp
 ```bash
 sudo journalctl -u webhook-picmi -f
 pm2 status
-tail -f /www/wwwroot/picmi/logs/deploy.log
+tail -f /opt/picmi/logs/deploy.log
 ```
 
 ---
@@ -153,4 +152,4 @@ git config --global url."https://gh.1s.fan/".insteadOf https://github.com/
 | webhook 不触发 | `journalctl -u webhook-picmi -f`，检查端口开放和 GitHub IP 可达 |
 | 构建失败 | `cat logs/deploy.log`，确认 Node.js 22+、pnpm 版本 |
 | PM2 reload 失败 | `pm2 logs picmi`，确认 `.output/server/index.mjs` 正常 listen |
-| 端口 9001 不通 | 云服务商安全组是否放行 |
+| 端口 9000 不通 | 云服务商安全组是否放行 |

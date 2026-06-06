@@ -1,14 +1,16 @@
 [{
-  "id": "deploy",
-  "execute-command": "/www/wwwroot/picmi/deploy.sh",
-  "command-working-directory": "/www/wwwroot/picmi",
+  "id": "picmi",
+  "execute-command": "/bin/bash",
+  "command-working-directory": "/opt/picmi",
   "response-message": "deploying",
-  "pass-arguments-to-command": [],
+  "pass-arguments-to-command": [
+    { "source": "string", "name": "deploy.sh" }
+  ],
   "trigger-rule": {
     "and": [
       {
         "match": {
-          "type": "payload-hash-sha256",
+          "type": "payload-hmac-sha256",
           "secret": "YOUR_WEBHOOK_SECRET",
           "parameter": {
             "source": "header",
