@@ -156,5 +156,5 @@ git config --global url."https://gh.1s.fan/".insteadOf https://github.com/
 |------|------|
 | webhook 不触发 | `journalctl -u webhook-picmi -f`，检查端口开放和 GitHub IP 可达 |
 | 构建失败 | `cat logs/deploy.log`，确认 Node.js 22+、pnpm 版本 |
-| PM2 reload 失败 | `pm2 logs picmi`，确认 `.output/server/index.mjs` 正常 listen |
+| PM2 reload 失败 | `pm2 logs picmi`，确认 `npm run start` 正常 listen |
 | 端口 9000 不通 | 云服务商安全组是否放行 |
