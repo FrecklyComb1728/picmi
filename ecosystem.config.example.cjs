@@ -1,8 +1,7 @@
 module.exports = {
   apps: [{
     name: 'picmi',
-    script: 'npm',
-    args: 'run start',
+    script: '.output/server/index.mjs',
     instances: 1,
     exec_mode: 'fork',
     max_memory_restart: '512M',
