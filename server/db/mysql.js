@@ -24,8 +24,8 @@ const initMysql = async (config) => {
     await run('CREATE TABLE IF NOT EXISTS settings (`key` VARCHAR(128) PRIMARY KEY, `value` TEXT NOT NULL)')
     await run('CREATE TABLE IF NOT EXISTS nodes (id VARCHAR(128) PRIMARY KEY, name VARCHAR(128), type VARCHAR(32), address TEXT, username TEXT, password TEXT, enabled TINYINT, root_dir TEXT)')
     await run('CREATE TABLE IF NOT EXISTS public_paths (path VARCHAR(768) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin PRIMARY KEY) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin')
-    await run('CREATE TABLE IF NOT EXISTS image_url_caches (id INT AUTO_INCREMENT PRIMARY KEY, node_id VARCHAR(128) NOT NULL, folder_path VARCHAR(768) NOT NULL, url TEXT NOT NULL, file_name VARCHAR(256), file_size BIGINT, uploaded_at VARCHAR(64), updated_at VARCHAR(64) NOT NULL, UNIQUE KEY uk_node_folder_url (node_id, folder_path, url(255)))')
-    await run('CREATE TABLE IF NOT EXISTS url_cache_logs (id INT AUTO_INCREMENT PRIMARY KEY, operator VARCHAR(128) NOT NULL, action VARCHAR(32) NOT NULL, node_id VARCHAR(128), folder_path VARCHAR(768), detail TEXT, created_at VARCHAR(64) NOT NULL)')
+    await run('CREATE TABLE IF NOT EXISTS image_url_caches (id INT AUTO_INCREMENT PRIMARY KEY, node_id VARCHAR(128) NOT NULL, folder_path VARCHAR(384) NOT NULL, url TEXT NOT NULL, file_name VARCHAR(256), file_size BIGINT, uploaded_at VARCHAR(64), updated_at VARCHAR(64) NOT NULL, UNIQUE KEY uk_node_folder_url (node_id, folder_path, url(255)))')
+    await run('CREATE TABLE IF NOT EXISTS url_cache_logs (id INT AUTO_INCREMENT PRIMARY KEY, operator VARCHAR(128) NOT NULL, action VARCHAR(32) NOT NULL, node_id VARCHAR(128), folder_path VARCHAR(384), detail TEXT, created_at VARCHAR(64) NOT NULL)')
     const columns = await all("SHOW COLUMNS FROM nodes LIKE 'type'")
     if (columns.length === 0) {
       await run('ALTER TABLE nodes ADD COLUMN type VARCHAR(32)')
